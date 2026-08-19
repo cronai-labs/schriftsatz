@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Refuse any commit that would introduce material from the private source setup.
+# Enable with: git config core.hooksPath .githooks
+exec "$(git rev-parse --show-toplevel)/tests/no-leaks.sh"

@@ -1,0 +1,41 @@
+% Minimal reproducer for the Inter calt/ToUnicode text-layer defect.
+%
+% Uses Inter-Regular.otf as shipped by the CTAN `inter` package in TeX Live,
+% resolved by kpathsea. No vendored fonts, no system font installation, so
+% this behaves identically on a developer machine and in CI.
+%
+% The build script selects a variant with a command-line \def:
+%   (none)          unmodified — reproduces the defect
+%   \NOCASE         RawFeature={-case}  — the plausible wrong guess
+%   \NOCALT         RawFeature={-calt}  — the correct fix
+%   \USEACTUALTEXT  \XeTeXgenerateactualtext=1 — fixes poppler only
+\documentclass{article}
+\usepackage{fontspec}
+
+% Resolve Inter either way, because distributions disagree about how it ships:
+% a full TeX Live has the CTAN `inter` package and kpathsea finds the file, while
+% Debian/Ubuntu texlive may not carry it and the font arrives via fonts-inter in
+% /usr/share/fonts, reachable only by family name.
+%
+% Picking the wrong font would silently test nothing — but it cannot go
+% unnoticed here: run.sh asserts that the UNFIXED build still exhibits the
+% defect, so any substituted face fails that control loudly.
+\IfFontExistsTF{Inter-Regular.otf}
+  {\def\interface{Inter-Regular.otf}}
+  {\IfFontExistsTF{Inter}
+    {\def\interface{Inter}}
+    {\GenericError{}{schriftsatz: Inter not found — install the CTAN `inter`
+      package or the fonts-inter system package}{}{}}}
+\ifdefined\USEACTUALTEXT\XeTeXgenerateactualtext=1\fi
+\ifdefined\NOCALT
+  \setmainfont{\interface}[Numbers={Proportional,Lining}, RawFeature={-calt}]
+\else
+  \ifdefined\NOCASE
+    \setmainfont{\interface}[Numbers={Proportional,Lining}, RawFeature={-case}]
+  \else
+    \setmainfont{\interface}[Numbers={Proportional,Lining}]
+  \fi
+\fi
+\begin{document}
+Materialaufwand −123,45 · (§ 4 Abs. 2 MusterG, ¼) −6.789,01 · Test (Klammer) −42
+\end{document}

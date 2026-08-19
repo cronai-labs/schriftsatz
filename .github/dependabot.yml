@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Actions are pinned by commit SHA, which is only safe if something keeps them
+  # moving. Without this, a pinned SHA quietly rots into an unpatched version.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]

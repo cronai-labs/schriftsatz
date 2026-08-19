@@ -1,0 +1,35 @@
+name: Bug report
+description: Something produces the wrong output
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Toolchain versions are essential here — almost every issue in this space
+        depends on the exact pandoc, TeX and extractor versions.
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: Output of the commands below
+      value: |
+        pandoc --version | head -1:
+        xelatex --version | head -1:
+        pdftotext -v 2>&1 | head -1:
+        OS:
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproducer
+      description: The smallest Markdown or LaTeX that shows the problem, and the exact command.
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual
+    validations: { required: true }
+  - type: textarea
+    id: extraction
+    attributes:
+      label: For text-layer issues
+      description: Output of `pdftotext yourfile.pdf -` and, if available, pypdf. Which font?

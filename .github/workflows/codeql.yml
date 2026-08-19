@@ -1,0 +1,30 @@
+name: CodeQL
+
+# Only the `actions` language applies here. CodeQL has no analyser for bash, Lua
+# or TeX, which is what this repository is made of — claiming a CodeQL gate over
+# the filters would be theatre. What it CAN check is the workflows themselves,
+# and that is worth having: script injection through `${{ }}` interpolation is a
+# real and easy mistake, and this repository interpolates a pull request title.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: github/codeql-action/init@4c0873ef8656cb3c50b3f42fb63bc1ade0cfa827  # v4
+        with:
+          languages: actions
+      - uses: github/codeql-action/analyze@4c0873ef8656cb3c50b3f42fb63bc1ade0cfa827  # v4

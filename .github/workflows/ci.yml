@@ -1,0 +1,203 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # shellcheck aborts its output stream on non-ASCII findings under a
+  # non-UTF-8 locale, then reports spurious parse errors in later files.
+  LC_ALL: C.UTF-8
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # The pandoc matrix lives here, and it deliberately does NOT install TeX.
+  # What varies across pandoc versions is the Lua filter behaviour, and that is
+  # checkable from the LaTeX/HTML writers alone — no PDF, no TeX Live, seconds
+  # per leg. Putting the matrix on the TeX job instead meant three multi-GB
+  # installs per run, which is what made CI unusable.
+  filters:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # Versions people actually run: Debian 12 oldstable ships 2.17.1.1
+        # (also the true API floor — the Lua Row.cells / Cell.col_span bindings
+        # arrived in 2.17), Debian 13 stable ships 3.1.11, and 3.10.2 is current.
+        pandoc: ['2.17.1.1', '3.1.11', '3.10.2']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Install pandoc ${{ matrix.pandoc }}
+        run: |
+          curl -fsSL -o /tmp/pandoc.deb \
+            "https://github.com/jgm/pandoc/releases/download/${{ matrix.pandoc }}/pandoc-${{ matrix.pandoc }}-1-amd64.deb"
+          sudo dpkg -i /tmp/pandoc.deb
+      - run: make test-fast
+
+  # One job pays for TeX Live, and it is the only one that needs to.
+  pdf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install TeX Live and PDF tooling
+        run: |
+          sudo apt-get update
+          # Deliberately minimal, and measured rather than guessed. Mapping
+          # every .sty that pandoc's template and these styles load back to its
+          # provider shows this set is sufficient — installs in ~100s at ~300 MB,
+          # against the tens of minutes that timed CI out before.
+          #
+          # Two earlier entries are gone because they were wrong, not because
+          # they were merely large:
+          #   texlive-latex-extra — was carried for upquote and xurl. Debian
+          #     ships both in texlive-latex-recommended; its split does not
+          #     follow TeX Live's collections. This was the multi-GB one.
+          #   texlive-science     — was carried for unicode-math, which is in
+          #     latex-recommended. It was never needed.
+          #
+          # The rest earn their place:
+          #   lmodern        — Debian splits it out of texlive-fonts-recommended.
+          #   texlive-lang-* — babel needs the .ldf for -V lang=; the CLI
+          #                    defaults to en-GB and fixtures use de-DE.
+          #   fonts-inter    — the calt reproducer needs Inter, and Debian's
+          #                    texlive has no CTAN inter package. Verified that
+          #                    kpathsea finds the file this package installs.
+          sudo apt-get install -y --no-install-recommends \
+            texlive-xetex \
+            texlive-latex-recommended \
+            texlive-fonts-recommended \
+            texlive-lang-german \
+            texlive-lang-english \
+            lmodern \
+            fonts-inter \
+            poppler-utils \
+            qpdf \
+            shellcheck \
+            lua-check
+
+      - name: Install pandoc
+        run: |
+          curl -fsSL -o /tmp/pandoc.deb \
+            "https://github.com/jgm/pandoc/releases/download/3.10.2/pandoc-3.10.2-1-amd64.deb"
+          sudo dpkg -i /tmp/pandoc.deb
+
+      - name: Install uv
+        # Pinned to the exact release: astral-sh publishes no floating v10 tag
+        # (v6 and earlier have one, v9/v10 do not), so `@v10` does not resolve.
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Inter must resolve, or the calt suite tests nothing
+        run: |
+          kpsewhich Inter-Regular.otf || fc-list | grep -qi 'Inter-Regular\|Inter:' \
+            || { echo "Inter not found by kpathsea or fontconfig"; fc-list | head; exit 1; }
+
+      - run: make setup
+      - run: make check
+      - run: make build
+
+      - name: Working tree must be clean after a build
+        run: |
+          make clean
+          test -z "$(git status --porcelain)" || { git status --porcelain; exit 1; }
+
+  policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with: { fetch-depth: 0 }
+      - name: Lint the workflows
+        # actionlint catches what YAML validation cannot: an action reference
+        # missing its owner/repo, double quotes inside a ${{ }} expression, and
+        # shell problems inside run blocks. Both of those shipped once and made
+        # the whole workflow fail to parse, producing a run with no jobs.
+        env:
+          ACTIONLINT_VERSION: '1.7.12'
+          ACTIONLINT_SHA256: '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8'
+        run: |
+          # Pinned and checksummed rather than `curl | bash`: the upstream
+          # installer script is fetched from a moving branch, so piping it to a
+          # shell in CI executes whatever that branch says today.
+          url="https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o /tmp/actionlint.tar.gz "$url"
+          echo "$ACTIONLINT_SHA256  /tmp/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          /tmp/actionlint -color
+
+      - name: Conventional Commits on the PR title
+        env:
+          # On a pull_request this is the PR title, which becomes the squash
+          # subject. On a push to main the squash has already happened, so the
+          # last commit subject IS that title — the same string, checked twice.
+          SUBJECT: ${{ github.event_name == 'pull_request' && github.event.pull_request.title || '' }}
+        run: |
+          subject="$SUBJECT"
+          if [ -z "$subject" ]; then
+            subject="$(git log -1 --pretty=%s)"
+          fi
+          printf 'checking: %s\n' "$subject"
+          # GitHub appends " (#123)" to the squash subject; the pattern ends in
+          # .+ so the suffix is tolerated rather than special-cased.
+          re='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+'
+          if printf '%s' "$subject" | grep -qE "$re"; then
+            echo "ok"
+          else
+            echo "::error::not a Conventional Commit subject: $subject"
+            exit 1
+          fi
+
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with: { fetch-depth: 0 }
+      - name: Denylist scan
+        run: ./tests/no-leaks.sh
+      - name: gitleaks
+        run: |
+          ver=8.28.0
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          # `gitleaks detect` was removed; 8.x exposes git / dir / stdin.
+          /tmp/gitleaks git --redact --no-banner .
+
+  ci-required:
+    # The one required check. Everything above feeds it, so the ruleset names a
+    # single stable context instead of a list that drifts with the matrix.
+    needs: [filters, pdf, policy, secrets]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every dependency must have succeeded
+        # Passed through env rather than interpolated into the script. Inlining
+        # ${{ }} in a run block splices the value into the shell before it runs,
+        # which is both a quoting hazard and the classic Actions script-injection
+        # shape; env binds it as data instead.
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          results="$RESULTS"
+          printf 'dependency results: %s\n' "$results"
+          for r in $results; do
+            # Anything that is not "success" fails the gate, including
+            # "skipped" and "cancelled". `if: always()` above means this job
+            # runs even when a dependency fails, so the gate reports rather
+            # than staying pending forever.
+            [ "$r" = "success" ] || { echo "::error::dependency result: $r"; exit 1; }
+          done
+          echo "all dependencies succeeded"

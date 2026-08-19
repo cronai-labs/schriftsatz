@@ -1,0 +1,21 @@
+% linebreaking.tex — line breaking for languages that build long compounds.
+%
+% Usable on its own:  pandoc doc.md -H linebreaking.tex --pdf-engine=xelatex ...
+%
+% \tolerance raises how loose a line TeX will accept before it gives up and
+% lets text run into the margin. The default is 200, which is strict enough
+% that TeX will REFUSE an available hyphenation point if taking it would leave
+% a loose line — so a break opportunity you inserted (see
+% filters/linebreaks.lua) goes unused and the overfull line happens anyway.
+%
+% 1500 rather than TeX's default of 200. Measured on one corpus of German
+% business documents, where 200 and 800 each left one overflowing line, 1500 left
+% none, and 3000 changed nothing further — your corpus will differ, so treat the
+% number as a considered default rather than a derived constant. The price is a
+% handful of loose lines. Text in the margin is the worse fault.
+\tolerance=1500
+
+% NOTE ON \emergencystretch: pandoc's own LaTeX template already sets
+% \setlength{\emergencystretch}{3em}. If you are using pandoc you have it
+% whether you ask for it or not, and re-setting it here would be a no-op.
+% Set it yourself only if you are not going through pandoc's template.

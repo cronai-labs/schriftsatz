@@ -1,0 +1,7 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question about German corporate law or document content
+    url: https://www.bstbk.de
+    about: >
+      This project is a typesetting tool and cannot answer legal or tax questions.
+      Please consult a Steuerberater, Notar or Rechtsanwalt.

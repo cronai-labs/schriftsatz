@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest something — please read the scope note first
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project is deliberately narrow. Please read
+        [docs/why-not.md](../../blob/main/docs/why-not.md) and
+        [CONTRIBUTING.md](../../blob/main/CONTRIBUTING.md) first — several
+        common requests are listed there as out of scope, with a better tool named.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: I have read docs/why-not.md and this is not covered by an existing tool listed there
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you hitting?
+      description: The problem, not the solution.
+    validations: { required: true }
