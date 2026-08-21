@@ -28,3 +28,6 @@ tests/tmp/
 # Node (commitlint is installed on demand in CI, never committed)
 node_modules/
 package-lock.json
+
+# goreleaser output
+dist/

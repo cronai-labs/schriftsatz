@@ -1,0 +1,58 @@
+% text-layer.tex — keep the PDF's text layer faithful to the source.
+%
+% Usable on its own:  pandoc doc.md -H text-layer.tex --pdf-engine=xelatex ...
+%
+% THE PROBLEM
+%
+% Many text faces carry a `calt` (contextual alternates) feature that swaps
+% minus, hyphen and parentheses for `.case` variants when they sit next to
+% capitals or digits — the same marks, optically raised to suit cap height.
+%
+% Those variants are usually encoded in the Private Use Area. XeTeX maps them
+% faithfully, so the PDF's ToUnicode table correctly reports a glyph as, say,
+% U+EE6B — and U+EE6B means nothing outside that one font. Extractors then
+% disagree: poppler DISCARDS PUA codepoints, so the character silently
+% disappears; pypdf keeps them, so you get mojibake where a minus sign belongs.
+%
+% The result is a PDF that looks perfectly correct and whose text layer is not.
+% In a profit-and-loss statement one extractor turns -123,45 into 123,45 and the
+% other into a character no parser will read. Neither warns you.
+%
+% See docs/inter-calt-tounicode.md for the full write-up, a reproducer that
+% needs nothing but a stock TeX Live, and the two fixes that do NOT work.
+%
+% THE FIX
+%
+% Disable calt on faces used for text that will be extracted. The substitution
+% then never happens, the glyph really is U+2212, and no extractor has to
+% implement anything optional to agree. \XeTeXgenerateactualtext=1 looks like a
+% better fix because it preserves the typography and satisfies poppler — but it
+% only adds an OPTIONAL /ActualText hint on top of the unchanged PUA mapping,
+% so pypdf and anything else ignoring /ActualText still gets mojibake.
+%
+% This file APPLIES that fix rather than describing it. \defaultfontfeatures
+% sets a default for every font loaded afterwards, so including this fragment is
+% enough — you do not have to remember RawFeature={-calt} at each \setmainfont,
+% and it still holds when you pass features of your own:
+%
+%   \setmainfont{YourFace}[Numbers={Proportional,Lining}]   % -calt still applied
+%
+% An earlier version of this file only explained the defect in a comment. A user
+% who included it and then set Inter got the exact bug the file is named after,
+% and got no warning, because the LaTeX default font does not exhibit it.
+%
+% If you deliberately want the case-sensitive punctuation back on a face whose
+% text will never be extracted, override locally:
+%
+%   \setmainfont{YourFace}[RawFeature={+calt}]
+%
+% The cost is that case-sensitive punctuation. Measured on a 300 dpi A4 render:
+% 2,106 of 26 MB of raster bytes change — 0.008% of the page. For a document
+% with numbers in it, that is the right trade.
+
+\usepackage{fontspec}
+\defaultfontfeatures{RawFeature={-calt}}
+
+% Tabular figures inside long tables so columns of amounts line up.
+\usepackage{etoolbox}
+\AtBeginEnvironment{longtable}{\addfontfeature{Numbers=Tabular}}

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The CLI is a Go binary** rather than a shell script, and embeds its Lua filters and LaTeX
+  fragments. This is what makes it installable: the script located its assets relative to its
+  own path, which breaks the moment a package manager puts the executable elsewhere. Three
+  silent shell portability failures motivated the move, including a `grep -qP` check that
+  errored on BSD grep and reported *clean* while testing nothing.
+- `styles/text-layer.tex` now **applies** the calt fix via `\defaultfontfeatures` instead of
+  describing it in a comment.
+
+### Added
+
+- `schriftsatz verify <file.pdf>` — reports Private Use Area codepoints by name and
+  cross-checks two extractors. Exit 1 is a finding, not a tool failure.
+- `--list-assets` / `--print-asset` to read the embedded filters and styles.
+- Homebrew cask via goreleaser, published to `cronai-labs/homebrew-tap`.
+- An agent skill at `skills/schriftsatz/`, installable with `npx skills add`.
+
 ## [0.1.0] - 2026-08-19
 
 First extraction from a private, working pipeline.

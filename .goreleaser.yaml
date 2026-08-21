@@ -1,0 +1,78 @@
+version: 2
+
+project_name: schriftsatz
+
+before:
+  hooks:
+    # Deliberately no `go mod tidy`: it rewrites a tracked file, so a release
+    # would mutate the tree it is releasing. `verify` is read-only, and the
+    # tests include the check that the embedded assets match the canonical ones.
+    - go mod verify
+    - go test ./...
+
+builds:
+  - id: schriftsatz
+    main: ./cmd/schriftsatz
+    binary: schriftsatz
+    env: [CGO_ENABLED=0]
+    # -trimpath strips local filesystem paths, so the binary does not carry the
+    # build machine's directory layout and two builds of the same commit agree.
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+archives:
+  - formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - docs/**/*
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: '{{ incpatch .Version }}-next'
+
+changelog:
+  # The changelog is hand-maintained and gates the release; generating a second
+  # one from commit subjects would produce two sources of truth that disagree.
+  disable: true
+
+# A Cask, not a Formula. goreleaser deprecated `brews` in v2.10 and hard-
+# deprecated it in v2.16: formulae that install pre-compiled binaries were a
+# workaround from before Linuxbrew supported casks, and casks are now the right
+# shape for shipping a built binary.
+homebrew_casks:
+  - name: schriftsatz
+    repository:
+      owner: cronai-labs
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_TOKEN }}'
+    homepage: https://github.com/cronai-labs/schriftsatz
+    description: Markdown to print-ready PDF via pandoc and XeLaTeX, with a text layer that survives extraction
+    # These are real homebrew-core formulae — including texlive, so the TeX
+    # distribution is a declared dependency rather than a README instruction.
+    dependencies:
+      - formula: pandoc
+      - formula: texlive
+      - formula: poppler
+    caveats: |
+      schriftsatz drives pandoc and XeLaTeX; both are installed as dependencies.
+
+      The binary carries its own Lua filters and LaTeX fragments:
+        schriftsatz --list-assets
+        schriftsatz --print-asset styles/text-layer.tex
+
+      Install uv for the second-extractor cross-check in `schriftsatz verify`.
+
+release:
+  draft: false
+  prerelease: auto
+  mode: keep-existing

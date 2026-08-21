@@ -2,7 +2,13 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-VERSION := $(shell sed -n 's/^VERSION="\(.*\)"/\1/p' bin/schriftsatz)
+# Single source of truth. The binary carries no version constant of its own —
+# it is injected at build time — so there is nowhere for it to drift to.
+# The '#' characters are escaped: unescaped, make reads them as the start of a
+# comment and truncates the $(shell ...) call mid-expression.
+VERSION := $(shell sed -n 's/^\#\# \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -1)
+BIN     := build/schriftsatz
+LDFLAGS := -s -w -X main.version=$(VERSION)
 
 .PHONY: help setup check test test-fast lint fmt build run clean release version
 
@@ -28,12 +34,13 @@ setup: ## Verify the toolchain (installs nothing globally)
 	echo "toolchain ok: pandoc $$(pandoc --version | head -1 | awk '{print $$2}')"
 
 test: ## Run the full suite
+	@go test ./...
 	@./tests/run.sh
 
 test-fast: ## Run only the assertions that need pandoc (no TeX, seconds)
 	@./tests/run.sh --no-pdf
 
-SHELL_FILES := bin/schriftsatz scripts/release.sh tests/run.sh tests/calt-mwe/run.sh tests/no-leaks.sh .githooks/pre-commit
+SHELL_FILES := scripts/release.sh tests/run.sh tests/calt-mwe/run.sh tests/no-leaks.sh .githooks/pre-commit
 
 lint: ## shellcheck every script
 	@# One shell: a bare `exit 0` in a guard only ends ITS line, so a second
@@ -47,6 +54,7 @@ lint: ## shellcheck every script
 	else \
 	  echo "shellcheck not installed — skipped locally, enforced in CI"; \
 	fi
+	@go vet ./... && echo "go vet clean"
 	@if command -v luacheck >/dev/null; then \
 	  luacheck filters/ && echo "luacheck clean"; \
 	else \
@@ -82,18 +90,28 @@ check: lint test ## What CI runs
 # \docimprint, which only exists once formal.tex is included — building the
 # examples with the default set would fail on it, and that failure is the point
 # of having this target at all.
+# Examples are built with the FULL style set. formal-document.md redefines
+# \docimprint, which only exists once formal.tex is included.
 STYLES := --style styles/text-layer.tex --style styles/linebreaking.tex --style styles/formal.tex
 
-build: ## Build every example into build/ (ignored) with the full style set
+build: ## Compile the binary (assets are embedded) and build every example
+	@# The embedded copies are regenerated here rather than trusted: they live in
+	@# internal/assets because go:embed cannot reach outside its own package, and
+	@# a Go test fails if they drift from the canonical files at the root.
+	@cp filters/*.lua internal/assets/filters/
+	@cp styles/*.tex  internal/assets/styles/
 	@mkdir -p build
+	@go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/schriftsatz
+	@echo "  $(BIN) ($(VERSION))"
 	@for f in examples/*.md; do \
-	  ./bin/schriftsatz "$$f" $(STYLES) -o "build/$$(basename "$${f%.md}").pdf" >/dev/null || exit 1; \
+	  $(BIN) "$$f" $(STYLES) -o "build/$$(basename "$${f%.md}").pdf" >/dev/null || exit 1; \
 	  echo "  build/$$(basename "$${f%.md}").pdf"; \
 	done
 
 run: ## Build one document: make run DOC=path/to/file.md
 	@[ -n "$(DOC)" ] || { echo "usage: make run DOC=file.md"; exit 2; }
-	@./bin/schriftsatz "$(DOC)"
+	@$(MAKE) -s build >/dev/null
+	@$(BIN) "$(DOC)"
 
 version: ## Print the version
 	@echo $(VERSION)
@@ -103,4 +121,5 @@ release: ## Tag a release (refuses on a dirty tree or off main)
 
 clean: ## Remove generated output
 	@rm -rf build
+	@go clean -cache -testcache 2>/dev/null || true
 	@echo "clean"
