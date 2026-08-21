@@ -38,13 +38,14 @@ jobs:
             exit 1
           fi
           version="${tag#v}"
-          declared="$(sed -n 's/^VERSION="\(.*\)"/\1/p' bin/schriftsatz)"
+          # CHANGELOG.md is the single source of truth: the version reaches the
+          # binary through -ldflags, so there is no constant in the source that
+          # could disagree with it.
+          declared="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -1)"
           if [ "$version" != "$declared" ]; then
-            echo "::error::tag $tag disagrees with bin/schriftsatz VERSION=$declared"
+            echo "::error::tag $tag disagrees with the newest CHANGELOG section ($declared)"
             exit 1
           fi
-          grep -q "^## \[$version\]" CHANGELOG.md \
-            || { echo "::error::CHANGELOG.md has no section for $version"; exit 1; }
           echo "version=$version" >> "$GITHUB_ENV"
 
       - name: The tag must point at a commit reachable from main
@@ -55,50 +56,23 @@ jobs:
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
             || { echo "::error::tagged commit is not an ancestor of main"; exit 1; }
 
-      - name: Build a reproducible tarball
-        run: |
-          # git archive is deterministic for a given tree, so the checksum is a
-          # property of the commit rather than of the machine that built it.
-          name="schriftsatz-$version"
-          git archive --format=tar.gz --prefix="$name/" -o "/tmp/$name.tar.gz" "$GITHUB_SHA"
-          cd /tmp && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
-          cat "$name.tar.gz.sha256"
-          echo "asset=/tmp/$name.tar.gz" >> "$GITHUB_ENV"
-          echo "sum=/tmp/$name.tar.gz.sha256" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
 
-      - name: The tarball must contain a working tool
-        run: |
-          # Verify the artefact, not the checkout — a release that ships a
-          # tarball nobody unpacked is how broken releases happen.
-          tmp=$(mktemp -d); tar -xzf "$asset" -C "$tmp"
-          root="$tmp/schriftsatz-$version"
-          test -x "$root/bin/schriftsatz" || { echo "::error::bin/schriftsatz missing or not executable"; exit 1; }
-          "$root/bin/schriftsatz" --version | grep -q "$version" \
-            || { echo "::error::CLI reports the wrong version"; exit 1; }
-          for f in filters/table-widths.lua filters/linebreaks.lua \
-                   styles/text-layer.tex styles/linebreaking.tex styles/formal.tex; do
-            test -f "$root/$f" || { echo "::error::missing from tarball: $f"; exit 1; }
-          done
-          echo "tarball verified"
-
-      - name: Publish the release, once
+      - name: Publish with goreleaser
+        # goreleaser builds every platform, checksums them, creates the release
+        # and pushes the Homebrew cask to cronai-labs/homebrew-tap. It replaces
+        # a hand-rolled tarball step, so the packaging path is exercised on
+        # every release rather than first tested when one is needed.
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
+        with:
+          version: '~> v2'
+          args: release --clean
         env:
-          GH_TOKEN: ${{ github.token }}
-          REF: ${{ github.ref_name }}
-        run: |
-          # Refuse rather than overwrite. Re-running a release should be a
-          # deliberate act, not a silent --clobber of a published asset.
-          if gh release view "$REF" >/dev/null 2>&1; then
-            echo "::error::release $REF already exists — refusing to modify it"
-            exit 1
-          fi
-          notes=$(awk "/^## \[$version\]/{f=1;next} /^## \[/{f=0} f" CHANGELOG.md)
-          # --verify-tag is belt-and-braces: a push:tags trigger already
-          # guarantees the tag exists remotely, but without it gh would happily
-          # CREATE a tag from the default branch if one were ever missing.
-          gh release create "$REF" \
-            --verify-tag \
-            --title "$REF" \
-            --notes "$notes" \
-            "$asset" "$sum"
-          echo "published $REF"
+          GITHUB_TOKEN: ${{ github.token }}
+          # A token scoped to the tap repository only. The default GITHUB_TOKEN
+          # cannot push to another repository, and widening it would give every
+          # workflow in this repo write access to the tap.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

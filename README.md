@@ -30,12 +30,30 @@ widths, and why a PDF that looks correct can have a text layer that is silently 
 ## 🚀 Quick start
 
 ```bash
-git clone https://github.com/cronai-labs/schriftsatz
-cd schriftsatz
+brew install cronai-labs/tap/schriftsatz
+schriftsatz document.md              # → document.pdf
+schriftsatz verify document.pdf      # is the text layer faithful?
+```
+
+Use the fully-qualified name: Homebrew 6.0 added tap trust, and an unqualified
+`brew install schriftsatz` after `brew tap` is refused.
+
+The binary carries its own Lua filters and LaTeX fragments — `--list-assets` to see them,
+`--print-asset <name>` to read one out.
+
+From a clone:
+
+```bash
+git clone https://github.com/cronai-labs/schriftsatz && cd schriftsatz
 make setup                  # verify the toolchain; installs nothing
-make check                  # lint + full suite + leak scan (this is what CI runs)
-make build                  # build every example into build/
-./bin/schriftsatz examples/minimal.md
+make check                  # lint + tests + leak scan (this is what CI runs)
+make build                  # compile the binary and build every example
+```
+
+As an agent skill, in any of the 76+ agents the installer supports:
+
+```bash
+npx skills add cronai-labs/schriftsatz
 ```
 
 `make` with no target lists everything.

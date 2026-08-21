@@ -2,6 +2,20 @@
 # Full suite. Run from anywhere.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(dirname "$HERE")"
+
+# The tool under test is the compiled binary, not a script. Build it if it is
+# not there, so `./tests/run.sh` works on a fresh clone without the caller
+# having to know to run `make build` first.
+SS="$ROOT/build/schriftsatz"
+if [ ! -x "$SS" ]; then
+  # `bin`, not `build`: building the examples needs a TeX distribution, and the
+  # fast path of this suite deliberately runs without one. Do not discard the
+  # error — a swallowed build failure here cost two CI round trips.
+  if ! ( cd "$ROOT" && make -s bin 2>&1 ); then
+    printf 'tests: could not compile %s\n' "$SS" >&2
+    exit 3
+  fi
+fi
 fails=0
 step () { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
@@ -40,6 +54,11 @@ fi
 
 step "table-widths: LaTeX-only guard"
 t=$(mktemp -d)
+# Materialise the embedded styles, so the suite exercises what the binary
+# actually ships rather than whatever is in the working tree.
+for s in text-layer linebreaking formal; do
+  "$SS" --print-asset "styles/$s.tex" > "$t/emb-$s.tex" 2>/dev/null || true
+done
 printf '| A | B |\n|:---|---:|\n| x | 1 |\n' > "$t/t.md"
 # "No-op" means the filter changes NOTHING for this writer, so the honest test
 # is a with/without comparison — not a search for width markup. docx and odt
@@ -112,7 +131,7 @@ if [ "$PDF" -eq 1 ]; then
 step "CLI: builds, writes where told, does not pollute its own tree"
 # Keep the build log: "CLI build failed" with no reason cost several CI round
 # trips to diagnose a missing babel language package.
-if "$ROOT/bin/schriftsatz" "$ROOT/examples/minimal.md" -o "$t/out.pdf" >"$t/cli.log" 2>&1; then
+if "$SS" "$ROOT/examples/minimal.md" -o "$t/out.pdf" >"$t/cli.log" 2>&1; then
   if [ -f "$t/out.pdf" ]; then ok "built to the requested path"; else bad "no PDF at the requested path"; fi
     # build/ is where output is SUPPOSED to go; excluding it is the point of
   # having a designated directory. This checks nothing leaks anywhere else.
@@ -134,7 +153,7 @@ cat > "$t/tl.tex" <<'TLEOF'
 TLEOF
 printf -- '---\ntitle: t\n---\n\nMaterialaufwand −123,45 · (Klammer) −42\n' > "$t/tl.md"
 if pandoc "$t/tl.md" --pdf-engine=xelatex \
-     -H "$ROOT/styles/text-layer.tex" -H "$t/tl.tex" -o "$t/tl.pdf" >/dev/null 2>&1; then
+     -H "$t/emb-text-layer.tex" -H "$t/tl.tex" -o "$t/tl.pdf" >/dev/null 2>&1; then
   got=$(pdftotext "$t/tl.pdf" - 2>/dev/null | tr -d '[:space:]')
   case "$got" in *"−123,45"*) ok "minus survives with a user-set Inter" ;;
                  *) bad "minus LOST — text-layer.tex is not applying -calt" ;; esac
@@ -153,11 +172,11 @@ fi
 step "verify: usable by a reader on their own PDF"
 if pandoc "$t/tl.md" --pdf-engine=xelatex -H "$t/tl.tex" -o "$t/tl-bad.pdf" >/dev/null 2>&1 \
    && [ -s "$t/tl.pdf" ]; then
-  if "$ROOT/bin/schriftsatz" verify "$t/tl.pdf" >/dev/null 2>&1; then
+  if "$SS" verify "$t/tl.pdf" >/dev/null 2>&1; then
     ok "verify passes a faithful PDF"
   else bad "verify rejected a faithful PDF"; fi
   # Negative control: it must FAIL the defective one, or it asserts nothing.
-  if "$ROOT/bin/schriftsatz" verify "$t/tl-bad.pdf" >/dev/null 2>&1; then
+  if "$SS" verify "$t/tl-bad.pdf" >/dev/null 2>&1; then
     bad "verify passed a PDF with Private Use Area codepoints"
   else ok "verify rejects a defective PDF (control)"; fi
 else
@@ -170,21 +189,21 @@ step "formal.tex: imprint is opt-in and never leaks"
 # read the resulting absent PDF, found nothing, and reported "ok". It could
 # never fail. Build a plain document and assert on a PDF that actually exists.
 printf -- '---\ntitle: t\n---\n\nPlain document.\n' > "$t/plain.md"
-if "$ROOT/bin/schriftsatz" "$t/plain.md" -o "$t/noimp.pdf" >"$t/plain.log" 2>&1 && [ -s "$t/noimp.pdf" ]; then
+if "$SS" "$t/plain.md" -o "$t/noimp.pdf" >"$t/plain.log" 2>&1 && [ -s "$t/noimp.pdf" ]; then
   if pdftotext "$t/noimp.pdf" - 2>/dev/null | grep -qE "Street|Directors:|Registry"; then
     bad "imprint appeared without formal.tex"
   else ok "no imprint without formal.tex"; fi
 else bad "control build failed — assertion would be vacuous"; sed -n '1,12p' "$t/plain.log" | sed 's/^/       /'; fi
 printf -- '---\ntitle: t\n---\n\nHello.\n' > "$t/bare.md"
-"$ROOT/bin/schriftsatz" "$t/bare.md" --style "$ROOT/styles/formal.tex" -o "$t/bare.pdf" >/dev/null 2>&1
+"$SS" "$t/bare.md" --style "$t/emb-formal.tex" -o "$t/bare.pdf" >/dev/null 2>&1
 if pdftotext "$t/bare.pdf" - 2>/dev/null | grep -qE "Street|Directors:|Registry"; then
   bad "default \\docimprint is not empty"
 else ok "default imprint is empty"; fi
 
 step "formal.tex: imprint reaches page 1 (the plain-page-style trap)"
-"$ROOT/bin/schriftsatz" "$ROOT/examples/formal-document.md" \
-  --style "$ROOT/styles/text-layer.tex" --style "$ROOT/styles/linebreaking.tex" \
-  --style "$ROOT/styles/formal.tex" -o "$t/formal.pdf" >/dev/null 2>&1
+"$SS" "$ROOT/examples/formal-document.md" \
+  --style "$t/emb-text-layer.tex" --style "$t/emb-linebreaking.tex" \
+  --style "$t/emb-formal.tex" -o "$t/formal.pdf" >/dev/null 2>&1
 pages=$(pdfinfo "$t/formal.pdf" 2>/dev/null | awk '/^Pages:/{print $2}')
 miss=0
 for p in $(seq 1 "${pages:-1}"); do
@@ -205,28 +224,25 @@ else bad "signature block split: date on p${dp:-?}, name on p${np:-?}"; fi
 fi   # end PDF-only assertions
 
 step "version: one source of truth, no drift"
-# The standard asks for a test that fails on drift. bin/schriftsatz is the
-# single source; everything else must agree with it, and the release workflow
-# refuses a tag that does not.
-v=$(sed -n 's/^VERSION="\(.*\)"/\1/p' "$ROOT/bin/schriftsatz")
-if [ -n "$v" ]; then ok "bin/schriftsatz declares a version ($v)"
-else bad "no VERSION in bin/schriftsatz"; fi
-if "$ROOT/bin/schriftsatz" --version 2>/dev/null | grep -q "$v"; then
-  ok "--version agrees"
-else bad "--version disagrees with VERSION"; fi
-if grep -q "^## \[$v\]" "$ROOT/CHANGELOG.md"; then
-  ok "CHANGELOG has a section for $v"
-else bad "CHANGELOG has no section for $v"; fi
+# The version lives in CHANGELOG.md and reaches the binary through -ldflags, so
+# there is no constant in the source to fall out of step. This asserts the chain
+# holds end to end.
+v=$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' "$ROOT/CHANGELOG.md" | head -1)
+if [ -n "$v" ]; then ok "CHANGELOG declares a version ($v)"
+else bad "no version section in CHANGELOG.md"; fi
+if "$SS" --version 2>/dev/null | grep -q "$v"; then
+  ok "the binary reports it"
+else bad "binary reports $("$SS" --version 2>/dev/null), CHANGELOG says $v"; fi
 if [ "$(make -C "$ROOT" -s version 2>/dev/null)" = "$v" ]; then
   ok "make version agrees"
 else bad "make version disagrees"; fi
 
 step "CLI: argument handling"
-if "$ROOT/bin/schriftsatz" --nonsense >/dev/null 2>&1; then bad "bad option should not exit 0"
+if "$SS" --nonsense >/dev/null 2>&1; then bad "bad option should not exit 0"
 elif [ $? -eq 2 ]; then ok "bad option exits 2"; else bad "bad option wrong exit code"; fi
-if "$ROOT/bin/schriftsatz" >/dev/null 2>&1; then bad "no input should not exit 0"
+if "$SS" >/dev/null 2>&1; then bad "no input should not exit 0"
 elif [ $? -eq 2 ]; then ok "no input exits 2"; else bad "no input wrong exit code"; fi
-if "$ROOT/bin/schriftsatz" --help >/dev/null 2>&1; then ok "--help exits 0"; else bad "--help failed"; fi
+if "$SS" --help >/dev/null 2>&1; then ok "--help exits 0"; else bad "--help failed"; fi
 
 rm -rf "$t"
 printf '\n'
