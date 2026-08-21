@@ -56,10 +56,14 @@ for fmt in html docx odt; do
     *)
       pandoc "$t/t.md" -t "$fmt" -o "$t/plain.$fmt" 2>/dev/null
       pandoc "$t/t.md" --lua-filter "$ROOT/filters/table-widths.lua" -t "$fmt" -o "$t/filt.$fmt" 2>/dev/null
-      # Zip containers: compare the XML payload, not the archive, since zip
-      # metadata carries timestamps that differ between two runs.
-      a=$(unzip -p "$t/plain.$fmt" '*.xml' 2>/dev/null)
-      b=$(unzip -p "$t/filt.$fmt"  '*.xml' 2>/dev/null)
+      # Compare ONLY the content part. Comparing every .xml includes
+      # docProps/core.xml, whose <dcterms:created> is a wall-clock timestamp —
+      # two runs a second apart differ with no filter involved at all, which
+      # made this assertion pass or fail on timing rather than on behaviour.
+      case "$fmt" in docx) part='word/document.xml' ;; *) part='content.xml' ;; esac
+      a=$(unzip -p "$t/plain.$fmt" "$part" 2>/dev/null)
+      b=$(unzip -p "$t/filt.$fmt"  "$part" 2>/dev/null)
+      [ -n "$a" ] || bad "$fmt: could not read $part — comparison would be vacuous"
       w=0 ;;
   esac
   if [ "$a" = "$b" ] && [ "${w:-0}" -eq 0 ]; then
@@ -119,6 +123,47 @@ if "$ROOT/bin/schriftsatz" "$ROOT/examples/minimal.md" -o "$t/out.pdf" >"$t/cli.
   else printf '  skip qpdf not installed\n'; fi
 else bad "CLI build failed"; sed -n '1,12p' "$t/cli.log" | sed 's/^/       /'; fi
 
+step "text-layer.tex applies the fix, not just a comment about it"
+# This is the assertion the project most needs and least obviously needs: the
+# LaTeX default font never exhibits the defect, so a fragment that documents the
+# fix without applying it passes every other test in this suite. Use a font that
+# DOES exhibit it, and check the extracted text.
+cat > "$t/tl.tex" <<'TLEOF'
+\usepackage{fontspec}
+\setmainfont{Inter-Regular.otf}[Numbers={Proportional,Lining}]
+TLEOF
+printf -- '---\ntitle: t\n---\n\nMaterialaufwand −123,45 · (Klammer) −42\n' > "$t/tl.md"
+if pandoc "$t/tl.md" --pdf-engine=xelatex \
+     -H "$ROOT/styles/text-layer.tex" -H "$t/tl.tex" -o "$t/tl.pdf" >/dev/null 2>&1; then
+  got=$(pdftotext "$t/tl.pdf" - 2>/dev/null | tr -d '[:space:]')
+  case "$got" in *"−123,45"*) ok "minus survives with a user-set Inter" ;;
+                 *) bad "minus LOST — text-layer.tex is not applying -calt" ;; esac
+  case "$got" in *"(Klammer)"*) ok "parentheses survive" ;;
+                 *) bad "parentheses lost" ;; esac
+  # Negative control: without the fragment the defect must reappear, or this
+  # test is measuring nothing.
+  pandoc "$t/tl.md" --pdf-engine=xelatex -H "$t/tl.tex" -o "$t/tl-none.pdf" >/dev/null 2>&1
+  none=$(pdftotext "$t/tl-none.pdf" - 2>/dev/null | tr -d '[:space:]')
+  case "$none" in *"−123,45"*) bad "control: defect did not reproduce without the fragment" ;;
+                  *) ok "control: without the fragment the minus is lost" ;; esac
+else
+  printf '  skip Inter not installed — cannot exercise the text-layer fix\n'
+fi
+
+step "verify: usable by a reader on their own PDF"
+if pandoc "$t/tl.md" --pdf-engine=xelatex -H "$t/tl.tex" -o "$t/tl-bad.pdf" >/dev/null 2>&1 \
+   && [ -s "$t/tl.pdf" ]; then
+  if "$ROOT/bin/schriftsatz" verify "$t/tl.pdf" >/dev/null 2>&1; then
+    ok "verify passes a faithful PDF"
+  else bad "verify rejected a faithful PDF"; fi
+  # Negative control: it must FAIL the defective one, or it asserts nothing.
+  if "$ROOT/bin/schriftsatz" verify "$t/tl-bad.pdf" >/dev/null 2>&1; then
+    bad "verify passed a PDF with Private Use Area codepoints"
+  else ok "verify rejects a defective PDF (control)"; fi
+else
+  printf '  skip Inter not installed — cannot exercise verify\n'
+fi
+
 step "formal.tex: imprint is opt-in and never leaks"
 # Use a document that does NOT redefine \docimprint. formal-document.md does,
 # so without formal.tex it fails to build — and an earlier version of this test
@@ -158,6 +203,23 @@ if [ -n "$dp" ] && [ "$dp" = "$np" ]; then ok "date and signature on the same pa
 else bad "signature block split: date on p${dp:-?}, name on p${np:-?}"; fi
 
 fi   # end PDF-only assertions
+
+step "version: one source of truth, no drift"
+# The standard asks for a test that fails on drift. bin/schriftsatz is the
+# single source; everything else must agree with it, and the release workflow
+# refuses a tag that does not.
+v=$(sed -n 's/^VERSION="\(.*\)"/\1/p' "$ROOT/bin/schriftsatz")
+if [ -n "$v" ]; then ok "bin/schriftsatz declares a version ($v)"
+else bad "no VERSION in bin/schriftsatz"; fi
+if "$ROOT/bin/schriftsatz" --version 2>/dev/null | grep -q "$v"; then
+  ok "--version agrees"
+else bad "--version disagrees with VERSION"; fi
+if grep -q "^## \[$v\]" "$ROOT/CHANGELOG.md"; then
+  ok "CHANGELOG has a section for $v"
+else bad "CHANGELOG has no section for $v"; fi
+if [ "$(make -C "$ROOT" -s version 2>/dev/null)" = "$v" ]; then
+  ok "make version agrees"
+else bad "make version disagrees"; fi
 
 step "CLI: argument handling"
 if "$ROOT/bin/schriftsatz" --nonsense >/dev/null 2>&1; then bad "bad option should not exit 0"

@@ -30,15 +30,28 @@
 % only adds an OPTIONAL /ActualText hint on top of the unchanged PUA mapping,
 % so pypdf and anything else ignoring /ActualText still gets mojibake.
 %
-% Apply it in your own \setmainfont as RawFeature={-calt}, e.g.
+% This file APPLIES that fix rather than describing it. \defaultfontfeatures
+% sets a default for every font loaded afterwards, so including this fragment is
+% enough — you do not have to remember RawFeature={-calt} at each \setmainfont,
+% and it still holds when you pass features of your own:
 %
-%   \setmainfont{YourFace}[Numbers={Proportional,Lining}, RawFeature={-calt}]
+%   \setmainfont{YourFace}[Numbers={Proportional,Lining}]   % -calt still applied
 %
-% The cost is the case-sensitive punctuation you gave up. Measured on a 300 dpi
-% A4 render: 2,106 of 26 MB of raster bytes change — 0.008% of the page. For a
-% document with numbers in it, that is the right trade.
+% An earlier version of this file only explained the defect in a comment. A user
+% who included it and then set Inter got the exact bug the file is named after,
+% and got no warning, because the LaTeX default font does not exhibit it.
+%
+% If you deliberately want the case-sensitive punctuation back on a face whose
+% text will never be extracted, override locally:
+%
+%   \setmainfont{YourFace}[RawFeature={+calt}]
+%
+% The cost is that case-sensitive punctuation. Measured on a 300 dpi A4 render:
+% 2,106 of 26 MB of raster bytes change — 0.008% of the page. For a document
+% with numbers in it, that is the right trade.
 
 \usepackage{fontspec}
+\defaultfontfeatures{RawFeature={-calt}}
 
 % Tabular figures inside long tables so columns of amounts line up.
 \usepackage{etoolbox}

@@ -111,7 +111,13 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
   # which is the same mistake the denylist made. What actually needs catching is
   # a stray identity — a commit from another machine, a bot, or a misconfigured
   # clone — and that shows up as a second entry regardless of what it is.
-  ids=$(git log --format='%an <%ae>%n%cn <%ce>' 2>/dev/null | sort -u || true)
+  # GitHub's own identities are excluded: for a pull_request event, checkout
+  # builds refs/pull/N/merge, and that merge commit is authored by GitHub. It is
+  # not a stray identity and it is not private data — but without this the rule
+  # fires on every PR, which is how a useful gate gets switched off.
+  ids=$(git log --format='%an <%ae>%n%cn <%ce>' 2>/dev/null \
+        | grep -vE '@users\.noreply\.github\.com>|<noreply@github\.com>|\[bot\]' \
+        | sort -u || true)
   n=$(printf '%s\n' "$ids" | grep -c . || true)
   [ "$n" -gt 1 ] && flag "history carries more than one identity ($n)" "$ids"
   hist=$(git log --format='%s%n%b' 2>/dev/null | grep -inE 'draf[t]|not yet file[d]|scratc[h]|T[O]DO' || true)

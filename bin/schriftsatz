@@ -10,7 +10,8 @@ usage() {
 schriftsatz — Markdown to print-ready PDF via pandoc and XeLaTeX
 
 USAGE
-  schriftsatz [options] <input.md>
+  schriftsatz [options] <input.md>     build a PDF
+  schriftsatz verify <file.pdf>        check that the PDF's text layer is faithful
 
 OPTIONS
   -o, --output FILE    Output path (default: <input>.pdf, next to the input)
@@ -58,7 +59,84 @@ preflight() {
   fi
 }
 
+# — verify: check a PDF's text layer ——————————————————————————
+# The project's whole claim is that a PDF can look right and extract wrong. That
+# check lived only in the test suite, wired to this repository's own fixtures, so
+# a user could not run it against their own document. Now they can.
+verify_pdf () {
+  local pdf="${1:-}"
+  [ -n "$pdf" ] || die "usage: schriftsatz verify <file.pdf>"
+  [ -f "$pdf" ] || die "not found: $pdf"
+  command -v pdftotext >/dev/null || die "pdftotext (poppler) is required for verify" 3
+
+  local poppler rc=0
+  poppler="$(pdftotext "$pdf" - 2>/dev/null)"
+
+  # The defect's signature is a Private Use Area codepoint in the text layer:
+  # the glyph is mapped faithfully to a codepoint that means nothing outside the
+  # font. poppler DISCARDS those, so they show up as characters that vanished;
+  # other extractors keep them and yield mojibake. Detect both.
+  # Detecting a Private Use Area codepoint portably is not a job for a shell
+  # bracket expression: the range is U+E000-U+F8FF, which is a three-byte UTF-8
+  # span, and `grep -P` is a GNU extension this project has already been bitten
+  # by. Use python when it is there, and say so plainly when it is not.
+  if command -v python3 >/dev/null 2>&1; then
+    if printf '%s' "$poppler" | python3 -c '
+import sys
+t = sys.stdin.read()
+hits = sorted({c for c in t if 0xE000 <= ord(c) <= 0xF8FF})
+if hits:
+    print(" ".join("U+%04X" % ord(c) for c in hits))
+    sys.exit(1)
+' >/tmp/.ss_pua 2>/dev/null; then
+      :
+    else
+      printf 'FAIL  %s: text layer contains Private Use Area codepoints (%s)\n' \
+        "$pdf" "$(cat /tmp/.ss_pua 2>/dev/null)"
+      printf '      the font mapped glyphs to codepoints that carry no meaning\n'
+      printf '      outside it — see docs/inter-calt-tounicode.md\n'
+      rc=1
+    fi
+    rm -f /tmp/.ss_pua
+  else
+    printf 'note  python3 absent; skipped the Private Use Area check\n'
+  fi
+
+  # Cross-check with a second extractor when one is available. Disagreement is
+  # the tell: poppler dropping a character while pypdf keeps a PUA codepoint is
+  # exactly the failure this project documents.
+  local pyrun=""
+  if command -v uv >/dev/null 2>&1; then pyrun="uv run --quiet --with pypdf python"
+  elif python3 -c 'import pypdf' >/dev/null 2>&1; then pyrun="python3"; fi
+  if [ -n "$pyrun" ]; then
+    local second
+    second="$($pyrun - "$pdf" 2>/dev/null <<'PY'
+import sys
+from pypdf import PdfReader
+print("".join(p.extract_text() for p in PdfReader(sys.argv[1]).pages))
+PY
+)"
+    local a b
+    a="$(printf '%s' "$poppler" | tr -d '[:space:]')"
+    b="$(printf '%s' "$second"  | tr -d '[:space:]')"
+    if [ "$a" != "$b" ]; then
+      printf 'FAIL  %s: extractors disagree (poppler vs pypdf)\n' "$pdf"
+      printf '      a PDF whose text layer depends on the reader is not a text layer\n'
+      rc=1
+    else
+      printf 'ok    two extractors agree\n'
+    fi
+  else
+    printf 'note  only one extractor available; install uv for a cross-check\n'
+  fi
+
+  [ "$rc" -eq 0 ] && printf 'ok    %s: text layer is faithful\n' "$pdf"
+  return "$rc"
+}
+
 # — arguments ————————————————————————————————————————————
+if [ "${1:-}" = "verify" ]; then shift; verify_pdf "${1:-}"; exit $?; fi
+
 IN=""; OUT=""; LANG_CODE="en-GB"; CAPACITY=""; KEEP_TEX=0; NO_DEFAULT=0
 STYLES=()
 

@@ -1,0 +1,104 @@
+name: Release
+
+# The sole trigger is a maintainer pushing an annotated tag. This workflow never
+# creates, moves or deletes a tag, and never writes back to main — main is
+# protected, and a workflow that pushes to it would need a bypass that defeats
+# the point of protecting it.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+# Never cancel a release in flight: a run interrupted between "create" and
+# "upload asset" leaves a published release with missing assets.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write        # required to create the release and upload assets
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with: { fetch-depth: 0 }
+
+      - name: The tag must be semver, and must match the version in the tool
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          tag="$REF"
+          # A case glob accepts v01.2.3 and v1.2.3-rc.1; this does not.
+          if ! printf '%s' "$tag" | grep -qE '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "::error::tag is not a plain vMAJOR.MINOR.PATCH: $tag"
+            exit 1
+          fi
+          version="${tag#v}"
+          declared="$(sed -n 's/^VERSION="\(.*\)"/\1/p' bin/schriftsatz)"
+          if [ "$version" != "$declared" ]; then
+            echo "::error::tag $tag disagrees with bin/schriftsatz VERSION=$declared"
+            exit 1
+          fi
+          grep -q "^## \[$version\]" CHANGELOG.md \
+            || { echo "::error::CHANGELOG.md has no section for $version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_ENV"
+
+      - name: The tag must point at a commit reachable from main
+        run: |
+          git fetch --quiet origin main
+          # Release only what is on the mainline. A tag on a side branch would
+          # publish code that never passed the default-branch gate.
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::tagged commit is not an ancestor of main"; exit 1; }
+
+      - name: Build a reproducible tarball
+        run: |
+          # git archive is deterministic for a given tree, so the checksum is a
+          # property of the commit rather than of the machine that built it.
+          name="schriftsatz-$version"
+          git archive --format=tar.gz --prefix="$name/" -o "/tmp/$name.tar.gz" "$GITHUB_SHA"
+          cd /tmp && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          cat "$name.tar.gz.sha256"
+          echo "asset=/tmp/$name.tar.gz" >> "$GITHUB_ENV"
+          echo "sum=/tmp/$name.tar.gz.sha256" >> "$GITHUB_ENV"
+
+      - name: The tarball must contain a working tool
+        run: |
+          # Verify the artefact, not the checkout — a release that ships a
+          # tarball nobody unpacked is how broken releases happen.
+          tmp=$(mktemp -d); tar -xzf "$asset" -C "$tmp"
+          root="$tmp/schriftsatz-$version"
+          test -x "$root/bin/schriftsatz" || { echo "::error::bin/schriftsatz missing or not executable"; exit 1; }
+          "$root/bin/schriftsatz" --version | grep -q "$version" \
+            || { echo "::error::CLI reports the wrong version"; exit 1; }
+          for f in filters/table-widths.lua filters/linebreaks.lua \
+                   styles/text-layer.tex styles/linebreaking.tex styles/formal.tex; do
+            test -f "$root/$f" || { echo "::error::missing from tarball: $f"; exit 1; }
+          done
+          echo "tarball verified"
+
+      - name: Publish the release, once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref_name }}
+        run: |
+          # Refuse rather than overwrite. Re-running a release should be a
+          # deliberate act, not a silent --clobber of a published asset.
+          if gh release view "$REF" >/dev/null 2>&1; then
+            echo "::error::release $REF already exists — refusing to modify it"
+            exit 1
+          fi
+          notes=$(awk "/^## \[$version\]/{f=1;next} /^## \[/{f=0} f" CHANGELOG.md)
+          # --verify-tag is belt-and-braces: a push:tags trigger already
+          # guarantees the tag exists remotely, but without it gh would happily
+          # CREATE a tag from the default branch if one were ever missing.
+          gh release create "$REF" \
+            --verify-tag \
+            --title "$REF" \
+            --notes "$notes" \
+            "$asset" "$sum"
+          echo "published $REF"
