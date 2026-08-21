@@ -8,8 +8,13 @@ HERE="$(cd "$(dirname "$0")" && pwd)"; ROOT="$(dirname "$HERE")"
 # having to know to run `make build` first.
 SS="$ROOT/build/schriftsatz"
 if [ ! -x "$SS" ]; then
-  ( cd "$ROOT" && make -s build >/dev/null 2>&1 ) || {
-    printf 'tests: could not build %s\n' "$SS" >&2; exit 3; }
+  # `bin`, not `build`: building the examples needs a TeX distribution, and the
+  # fast path of this suite deliberately runs without one. Do not discard the
+  # error — a swallowed build failure here cost two CI round trips.
+  if ! ( cd "$ROOT" && make -s bin 2>&1 ); then
+    printf 'tests: could not compile %s\n' "$SS" >&2
+    exit 3
+  fi
 fi
 fails=0
 step () { printf '\n\033[1m%s\033[0m\n' "$1"; }

@@ -10,7 +10,7 @@ VERSION := $(shell sed -n 's/^\#\# \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | hea
 BIN     := build/schriftsatz
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: help setup check test test-fast lint fmt build run clean release version
+.PHONY: help setup check test test-fast lint fmt bin build run clean release version
 
 help: ## List targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -94,15 +94,17 @@ check: lint test ## What CI runs
 # \docimprint, which only exists once formal.tex is included.
 STYLES := --style styles/text-layer.tex --style styles/linebreaking.tex --style styles/formal.tex
 
-build: ## Compile the binary (assets are embedded) and build every example
-	@# The embedded copies are regenerated here rather than trusted: they live in
-	@# internal/assets because go:embed cannot reach outside its own package, and
-	@# a Go test fails if they drift from the canonical files at the root.
+bin: ## Compile the binary only (no TeX needed)
+	@# Separate from `build` because compiling needs Go and nothing else, while
+	@# building the examples needs a TeX distribution. The fast CI job has the
+	@# former and deliberately not the latter.
 	@cp filters/*.lua internal/assets/filters/
 	@cp styles/*.tex  internal/assets/styles/
 	@mkdir -p build
 	@go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/schriftsatz
 	@echo "  $(BIN) ($(VERSION))"
+
+build: bin ## Compile the binary and build every example (needs TeX)
 	@for f in examples/*.md; do \
 	  $(BIN) "$$f" $(STYLES) -o "build/$$(basename "$${f%.md}").pdf" >/dev/null || exit 1; \
 	  echo "  build/$$(basename "$${f%.md}").pdf"; \
