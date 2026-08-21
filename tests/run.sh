@@ -56,10 +56,14 @@ for fmt in html docx odt; do
     *)
       pandoc "$t/t.md" -t "$fmt" -o "$t/plain.$fmt" 2>/dev/null
       pandoc "$t/t.md" --lua-filter "$ROOT/filters/table-widths.lua" -t "$fmt" -o "$t/filt.$fmt" 2>/dev/null
-      # Zip containers: compare the XML payload, not the archive, since zip
-      # metadata carries timestamps that differ between two runs.
-      a=$(unzip -p "$t/plain.$fmt" '*.xml' 2>/dev/null)
-      b=$(unzip -p "$t/filt.$fmt"  '*.xml' 2>/dev/null)
+      # Compare ONLY the content part. Comparing every .xml includes
+      # docProps/core.xml, whose <dcterms:created> is a wall-clock timestamp —
+      # two runs a second apart differ with no filter involved at all, which
+      # made this assertion pass or fail on timing rather than on behaviour.
+      case "$fmt" in docx) part='word/document.xml' ;; *) part='content.xml' ;; esac
+      a=$(unzip -p "$t/plain.$fmt" "$part" 2>/dev/null)
+      b=$(unzip -p "$t/filt.$fmt"  "$part" 2>/dev/null)
+      [ -n "$a" ] || bad "$fmt: could not read $part — comparison would be vacuous"
       w=0 ;;
   esac
   if [ "$a" = "$b" ] && [ "${w:-0}" -eq 0 ]; then
