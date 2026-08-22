@@ -291,9 +291,21 @@ else bad "VERSION= did not reach the binary — ldflags injection is broken"; fi
 # read CHANGELOG.md to check a pushed tag against it, which is a guard on the
 # old flow rather than a version source for the build. PR 4 of #30 deletes both
 # readers, and this exemption with them.
-strays=$(cd "$ROOT" && git grep -lE "git describe|git tag -l|s/\\^## " -- \
-           Makefile scripts tests .github 2>/dev/null \
-         | grep -vE '^(scripts/version\.sh|tests/run\.sh|tests/release-dryrun\.sh|\.github/workflows/release\.yml)$' || true)
+# A subshell with an explicit exit rather than `cd X && ... || true`, which
+# SC2015 flags on the 0.9.0 that CI runs but not on newer local versions.
+# (Do not start that explanation with the linter's name at the beginning of a
+# comment line — it is parsed as a directive and errors with SC1073.)
+# Hoisted out of the command substitution: the escaped `##` inside a quoted
+# argument in a $( ) is mis-parsed by the 0.9.0 that CI runs, which then reports
+# an unrelated "couldn't find fi" hundreds of lines later.
+stray_re='git describe|git tag -l|s/\^## '
+stray_known='^(scripts/version\.sh|tests/run\.sh|tests/release-dryrun\.sh|\.github/workflows/release\.yml)$'
+strays=$(
+  cd "$ROOT" || exit 0
+  git grep -lE "$stray_re" -- Makefile scripts tests .github 2>/dev/null \
+    | grep -vE "$stray_known" \
+    || true
+)
 if [ -z "$strays" ]; then ok "no second place computes a version"
 else bad "these compute a version of their own: $(printf '%s' "$strays" | tr '\n' ' ')"; fi
 
@@ -312,7 +324,10 @@ if git clone -q --depth 1 "file://$ROOT" "$t2" >/dev/null 2>&1; then
   mkdir -p "$t2/scripts"
   cp "$ROOT/scripts/version.sh" "$t2/scripts/version.sh"
   chmod +x "$t2/scripts/version.sh"
-  sv=$(cd "$t2" && ./scripts/version.sh 2>/dev/null || true)
+  sv=$(
+    cd "$t2" || exit 0
+    ./scripts/version.sh 2>/dev/null || true
+  )
   if [ -n "$sv" ]; then ok "version.sh survives a shallow clone with no tags ($sv)"
   else bad "version.sh printed nothing in a --depth 1 clone"; fi
 else
