@@ -78,8 +78,9 @@ run.
   that window are the cask push (`cask.Pipe` is `ContinueOnError`, so goreleaser reports it after
   the release is live) and the read-back verification steps. Recovery is
   `gh workflow run release.yml -f tag=vX.Y.Z`, which re-runs the publish against the existing
-  tag. The hourly sweep does **not** cover this — it only repairs failures from before the tag
-  existed.
+  tag. A plain re-run of the failed workflow does **not** repair it either: once the tag exists,
+  `--bump --unreleased` returns it with no commits, so `plan` decides there is nothing to release.
+  That is the one case the `tag` dispatch input exists for.
 - **`release.mode: replace` discards hand-edited release notes** on any later resume. If you edit
   a published body with `gh release edit`, a subsequent resume overwrites it.
 
@@ -89,6 +90,8 @@ Not just the date. Re-verify when any of these happen:
 
 - goreleaser changes its create/upload/publish ordering, or stops drafting first — the
   rehearsal's ordering assertions fail loudly if so
+- `cask.Pipe` stops being reported through `memo.Error()`, which is what makes a failed cask
+  push turn the run red rather than passing silently
 - the `release-tag-creation` ruleset or the App installation changes
 - GitHub changes when a release creates its tag
 - git-cliff's bump rules change, or `breaking_always_bump_major` is removed from `cliff.toml`

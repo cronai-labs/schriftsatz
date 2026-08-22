@@ -32,9 +32,16 @@ on:
   # AFTER CI, not alongside it. `on: push: branches: [main]` started this
   # workflow at the same instant as CI on the same commit, so the check-run gate
   # below found ci-required "missing" every single time and every run skipped —
-  # observed on the first two attempts. Releases then depended entirely on the
-  # hourly sweep, which GitHub schedules on a best-effort basis and delayed past
-  # 20 minutes here. "Merging publishes" has to mean minutes, not eventually.
+  # observed on the first two attempts. Releases then depended entirely on an
+  # hourly cron sweep, which GitHub schedules best-effort and which was still
+  # 25 minutes late when measured. "Merging publishes" has to mean minutes.
+  #
+  # That sweep is gone. It existed to catch runs that skipped, and with this
+  # trigger they do not: every failure mode is already RED and visible. A cask
+  # push that fails is memorised by goreleaser and returned from memo.Error(),
+  # so the run exits non-zero; the read-back steps exit 1 themselves. An
+  # unattended job that can create a permanent, immutable tag was not worth
+  # keeping to re-detect what a red run already says.
   #
   # workflow_run fires when CI finishes, so ci-required exists and has a verdict
   # by the time plan looks. It also runs the copy of this file on the DEFAULT
@@ -44,31 +51,16 @@ on:
     workflows: [CI]
     types: [completed]
     branches: [main]
-  # The sweep, and it is worth being exact about what it does and does not fix.
-  #
-  # It repairs anything that failed or skipped BEFORE the tag exists: a run that
-  # deferred to the tip and then that run failing, a red CI that has since gone
-  # green, a transient. Those are pure functions of the commit history, so
-  # running again is the whole repair. Without this, "a later run covers it" is
-  # a promise with no enforcement — the tip guard makes every run in a burst
-  # defer to the last one, and if THAT run dies nothing releases until somebody
-  # merges again and happens to notice.
-  #
-  # It does NOT repair anything that failed AFTER the un-draft. Once the tag
-  # exists and main's tip is the tagged commit, `git-cliff --bump --unreleased`
-  # returns the current tag with no commits, so plan decides there is nothing to
-  # release and the sweep is a no-op. The two failures that live in that window
-  # — the cask push (cask.Pipe is ContinueOnError, so goreleaser reports it
-  # after the release is already live) and the read-back verification steps —
-  # need the workflow_dispatch below, naming the tag. That is a manual step and
-  # this comment says so rather than implying otherwise.
-  schedule:
-    - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
       tag:
         description: >-
-          Resume the publish for a tag that ALREADY EXISTS (vX.Y.Z) — for a run
+          Re-run the failed run FIRST; this is only for a publish that already
+          cut its tag (vX.Y.Z). A plain re-run repairs anything that failed
+          before the un-draft, because plan simply computes the version again.
+          It cannot repair anything after: once the tag exists, --bump
+          --unreleased returns it with no commits, so plan decides there is
+          nothing to release and the re-run skips. Resume the publish for a run
           that died after its tag was created. Leave empty to release the tip of
           main. A tag that does not already exist is refused: this input can
           repair a release, never mint a version.
@@ -132,7 +124,8 @@ jobs:
           # this run was triggered for would spend a version number on an
           # intermediate state of a stack that nobody asked to ship — and that
           # tag could never be withdrawn. The run for the current tip covers this
-          # work too, and the hourly sweep covers that run failing.
+          # work too. If THAT run fails it fails red, which is the signal —
+          # re-run it rather than waiting for something to sweep it up.
           echo "::notice::main is at $tip, this run is for $TRIGGER_SHA — a later run covers it"
           echo "current=false" >>"$GITHUB_OUTPUT"
 
@@ -151,8 +144,9 @@ jobs:
         # at main first. This replaces that, rather than simply dropping it.
         #
         # Queued or running is a SKIP, not a failure: the run that CI is still
-        # working on is covered by the sweep once its checks land. Only an
-        # actually-failed or missing ci-required stops the release.
+        # working on gets its own release when CI completes, since that
+        # completion is itself the trigger. Only an actually-failed
+        # ci-required stops the release.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHA: ${{ steps.tip.outputs.sha }}
@@ -168,7 +162,7 @@ jobs:
           case "$state" in
             success) echo "ok=true" >>"$GITHUB_OUTPUT" ;;
             pending|missing)
-              echo "::notice::ci-required is $state on $SHA — the sweep releases it once CI lands"
+              echo "::notice::ci-required is $state on $SHA — the run for its completion releases it"
               echo "ok=false" >>"$GITHUB_OUTPUT" ;;
             *)
               echo "::error::ci-required failed on $SHA — refusing to release it"
