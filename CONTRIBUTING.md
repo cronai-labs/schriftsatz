@@ -79,6 +79,15 @@ docs(calt): correct the ToUnicode mechanism
 test(styles): assert the signature block cannot be split
 ```
 
-`make release` regenerates `CHANGELOG.md` from this history with `git-cliff` when it is
-installed, and otherwise verifies the hand-written entry for the version. Either way the
-commit message is what a reader of the release notes sees — write it for them.
+**`CHANGELOG.md` is generated, never hand-edited** — `make changelog` regenerates it from the
+history with git-cliff, and the release workflow generates its notes from the same source.
+
+That has a consequence worth knowing before you write a PR description: **your description
+becomes the changelog entry.** Squash-merging puts it into the commit body verbatim, so write
+it for someone reading release notes later, not only for the reviewer today. Sections titled
+Checklist, Not verified, or Needs a secret are stripped as process, and headings are demoted
+so they nest under the version.
+
+Put `Closes #n` at the **end** of the description if you can. A leading one is handled, but
+only because a preprocessor removes it first: the conventional-commit parser reads a leading
+`Closes #n` as a footer and swallows the entire body into it.

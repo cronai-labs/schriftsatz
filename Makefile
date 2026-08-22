@@ -10,7 +10,7 @@ VERSION := $(shell sed -n 's/^\#\# \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | hea
 BIN     := build/schriftsatz
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: help setup check test test-fast lint fmt bin build run clean release version
+.PHONY: help setup check test test-fast lint fmt bin build run clean changelog release version
 
 help: ## List targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -118,8 +118,26 @@ run: ## Build one document: make run DOC=path/to/file.md
 version: ## Print the version
 	@echo $(VERSION)
 
-release: ## Tag a release (refuses on a dirty tree or off main)
-	@./scripts/release.sh
+changelog: ## Regenerate CHANGELOG.md from the commit history
+	@# Generated, never hand-edited: each entry's prose is the pull request
+	@# description, which squash-merging puts into the commit body.
+	@if command -v git-cliff >/dev/null; then \
+	  git-cliff --tag "v$(VERSION)" -o CHANGELOG.md; \
+	else \
+	  docker run --rm -v "$$PWD":/repo -w /repo orhunp/git-cliff:latest \
+	    --tag "v$(VERSION)" -o CHANGELOG.md; \
+	fi
+	@echo "  CHANGELOG.md regenerated for v$(VERSION)"
+
+release: ## How to cut a release
+	@echo "Releases are tag-driven and the tag push is a human action:"
+	@echo
+	@echo "  1. make changelog VERSION=X.Y.Z   # regenerate, review, open a PR, merge"
+	@echo "  2. git tag -a vX.Y.Z -m vX.Y.Z"
+	@echo "  3. git push origin vX.Y.Z"
+	@echo
+	@echo "The workflow then validates semver, ancestry and the changelog entry,"
+	@echo "builds every platform, and pushes the Homebrew cask."
 
 clean: ## Remove generated output
 	@rm -rf build

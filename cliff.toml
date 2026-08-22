@@ -1,12 +1,20 @@
-# git-cliff — CHANGELOG generated from Conventional Commits.
+# git-cliff — CHANGELOG.md and the release notes are BOTH generated from here,
+# so there is exactly one source of truth.
+#
+# The prose in each entry is the pull request description: the working model
+# sets squash_merge_commit_message=PR_BODY, so every squash commit on main
+# carries it. Generating therefore does NOT reduce entries to one-line subjects,
+# which was the mistaken reason this file previously sat unused.
 [changelog]
 header = """
 # Changelog
 
 All notable changes to this project are documented here.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Generated from the commit history by [git-cliff](https://git-cliff.org) — do not
+edit by hand, the next release overwrites it. Each entry's prose is the
+description of the pull request that introduced the change.
+
 """
 body = """
 {% if version %}## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
@@ -15,24 +23,55 @@ body = """
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | upper_first }}
 {% for commit in commits %}
-- {{ commit.message | upper_first }}\
+- **{{ commit.message | upper_first }}**
+{% if commit.body %}
+{{ commit.body | trim }}
+{% endif %}
 {% endfor %}
 {% endfor %}
 """
 trim = true
+footer = ""
 
 [git]
 conventional_commits = true
 filter_unconventional = true
+
+# Order matters. The first rule is load-bearing rather than cosmetic:
+# GitHub's squash puts the PR description in the body, and these descriptions
+# open with "Closes #n". The conventional-commit parser reads a leading
+# "Closes #n" as a FOOTER token and then swallows the entire remaining body into
+# that footer's value, leaving commit.body null — which is why an earlier
+# attempt at this rendered subjects only. Removing the line before parsing lets
+# the body parse as a body.
+commit_preprocessors = [
+  { pattern = '(?m)^(Closes|Fixes|Resolves) #[0-9]+[ \t]*\r?\n+', replace = "" },
+  # GitHub's " (#123)" suffix is deliberately KEPT: it is the reader's link back
+  # to the pull request and the discussion behind the change.
+
+  # A pull request description is written for reviewers, so it carries sections
+  # that are process rather than product. Drop them before they become release
+  # notes.
+  # No lookahead: git-cliff uses Rust's regex crate, which does not support it.
+  # The section is consumed by matching its heading and then every following
+  # line that is blank or does not begin a new heading.
+  { pattern = '(?m)^#{1,6} (Checklist|Not verified|Needs a secret[^\n]*)[^\n]*\n([^#\n][^\n]*\n|\n)*', replace = "" },
+  # Demote every heading in the body. Left alone, a "## Why" from a PR sits at
+  # the same level as "## [0.1.0]" and silently breaks the document hierarchy.
+  { pattern = '(?m)^#{1,5} ', replace = "#### " },
+]
+
 commit_parsers = [
   { message = "^feat", group = "Added" },
   { message = "^fix", group = "Fixed" },
   { message = "^docs", group = "Documentation" },
-  { message = "^test", group = "Testing" },
-  { message = "^refactor", group = "Changed" },
   { message = "^perf", group = "Changed" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^test", group = "Testing" },
   { message = "^chore\\(release\\)", skip = true },
-  { message = "^chore", group = "Miscellaneous" },
+  # Dependabot is real work but not what a reader of release notes wants.
   { message = "^ci", skip = true },
+  { message = "^build\\(deps", skip = true },
+  { message = "^chore", group = "Miscellaneous" },
 ]
 tag_pattern = "v[0-9]*"
