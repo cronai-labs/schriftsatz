@@ -192,7 +192,7 @@ if [ "$cliff_ok" -ne 1 ]; then
   sed 's/^/  /' "$WORK/cliff.err"
   exit 1
 fi
-echo "  notes: $(wc -c <"$WORK/notes.md" | tr -d ' ') bytes, $(grep -c '^- ' "$WORK/notes.md" || true) entries"
+echo "  notes: $(wc -c <"$WORK/notes.md" | tr -d ' ') bytes, $(grep -c '^[-*] ' "$WORK/notes.md" || true) entries"
 
 # CHANGELOG.md is generated at release time and shipped in the archives rather
 # than committed, so a fresh clone does not have one.
@@ -291,7 +291,7 @@ $(python3 - "$WORK/out/release-create.json" "$WORK/notes.md" <<'PY'
 import json, sys
 body = (json.load(open(sys.argv[1], encoding="utf-8")).get("body") or "")
 notes = open(sys.argv[2], encoding="utf-8").read()
-entries = sum(1 for line in body.splitlines() if line.startswith("- "))
+entries = sum(1 for line in body.splitlines() if line[:2] in ("- ", "* "))
 print(len(body), entries, body.strip() == notes.strip())
 PY
 )

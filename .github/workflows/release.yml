@@ -192,7 +192,7 @@ jobs:
           version="$(jq -r '.[0].version // ""' /tmp/context.json)"
           {
             echo "version=$version"
-            echo "entries=$(grep -c '^- ' /tmp/release-notes.md || true)"
+            echo "entries=$(grep -c '^[-*] ' /tmp/release-notes.md || true)"
           } >>"$GITHUB_OUTPUT"
 
       - name: Decide whether there is a release here
@@ -388,7 +388,7 @@ jobs:
           git-cliff --current --strip header >/tmp/release-notes.md
           # Count ENTRIES, not bytes. v0.1.0 shipped an empty body past a `-s`
           # check because git-cliff emitted a heading and nothing else.
-          entries="$(grep -c '^- ' /tmp/release-notes.md || true)"
+          entries="$(grep -c '^[-*] ' /tmp/release-notes.md || true)"
           if [ "${entries:-0}" -lt 1 ]; then
             echo "::error::git-cliff produced no entries for $TAG"
             echo "--- what it produced ---"; cat /tmp/release-notes.md; exit 1
@@ -482,7 +482,7 @@ jobs:
           body="$(printf '%s' "$json"   | jq -r .body)"
           draft="$(printf '%s' "$json"  | jq -r .isDraft)"
           assets="$(printf '%s' "$json" | jq '.assets | length')"
-          entries="$(printf '%s\n' "$body" | grep -c '^- ' || true)"
+          entries="$(printf '%s\n' "$body" | grep -c '^[-*] ' || true)"
           printf 'tag=%s draft=%s assets=%s entries=%s bytes=%s\n' \
             "$got" "$draft" "$assets" "${entries:-0}" \
             "$(printf '%s' "$body" | wc -c | tr -d ' ')"
