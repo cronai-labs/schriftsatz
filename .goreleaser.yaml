@@ -32,7 +32,12 @@ archives:
       - LICENSE
       - README.md
       - CHANGELOG.md
-      - docs/**/*
+      # docs/** and NOT docs/**/*. goreleaser matches with gobwas/glob,
+      # where ** spans separators and a trailing /* then demands a literal /
+      # after it — so docs/**/* only matches at depth 2 or deeper and every
+      # doc sits at depth 1. It matched nothing, goreleaser only warned, and
+      # v0.1.0 shipped with no documentation in any tarball.
+      - docs/**
 
 checksum:
   name_template: checksums.txt
