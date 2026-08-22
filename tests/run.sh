@@ -287,10 +287,15 @@ else bad "VERSION= did not reach the binary — ldflags injection is broken"; fi
 # takes are asking git directly and parsing a heading out of a changelog; both
 # were real here, with the same sed copied into four files.
 #
-# release.yml and release-dryrun.sh are exempt ONLY until #30 lands: they still
-# read CHANGELOG.md to check a pushed tag against it, which is a guard on the
-# old flow rather than a version source for the build. PR 4 of #30 deletes both
-# readers, and this exemption with them.
+# The exemption those two files carried until #30 landed is gone with the
+# readers it covered: nothing parses a version out of CHANGELOG.md any more.
+#
+# What this forbids is a second way to derive the BUILD version — `git describe`
+# outside version.sh, or parsing a `## [x.y.z]` heading. It deliberately does
+# not forbid `git tag -l`: asking which tag is newest is a different question
+# from deriving a version, and the release workflow legitimately does it while
+# verifying what it published. So this is narrower than its name suggests, and
+# saying so is better than an assertion people believe covers more than it does.
 # A subshell with an explicit exit rather than `cd X && ... || true`, which
 # SC2015 flags on the 0.9.0 that CI runs but not on newer local versions.
 # (Do not start that explanation with the linter's name at the beginning of a
@@ -298,8 +303,8 @@ else bad "VERSION= did not reach the binary — ldflags injection is broken"; fi
 # Hoisted out of the command substitution: the escaped `##` inside a quoted
 # argument in a $( ) is mis-parsed by the 0.9.0 that CI runs, which then reports
 # an unrelated "couldn't find fi" hundreds of lines later.
-stray_re='git describe|git tag -l|s/\^## '
-stray_known='^(scripts/version\.sh|tests/run\.sh|tests/release-dryrun\.sh|\.github/workflows/release\.yml)$'
+stray_re='git describe|s/\^## '
+stray_known='^(scripts/version\.sh|tests/run\.sh)$'
 strays=$(
   cd "$ROOT" || exit 0
   git grep -lE "$stray_re" -- Makefile scripts tests .github 2>/dev/null \

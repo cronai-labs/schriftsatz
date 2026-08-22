@@ -1,132 +1,487 @@
 name: Release
 
-# The sole trigger is a maintainer pushing an annotated tag. This workflow never
-# creates, moves or deletes a tag, and never writes back to main — main is
-# protected, and a workflow that pushes to it would need a bypass that defeats
-# the point of protecting it.
+# Merging to main IS the release. No release pull request, no hand-written
+# version, no human tag push, nothing to click.
+#
+# Three properties carry the whole safety argument, and tests/release-dryrun.sh
+# asserts all three on every pull request, so a dependency upgrade cannot
+# quietly remove them:
+#
+#  1. NO TAG IS PUSHED BY ANYTHING. goreleaser creates the GitHub release as a
+#     draft, uploads every asset, and only then PATCHes it to draft:false;
+#     GitHub creates the git tag from release.target_commitish at that moment.
+#     Everything that can fail therefore fails while the version number is still
+#     unspent. That matters more here than in most repositories: ruleset
+#     release-tag-immutability has no bypass actor at all, so a tag cut in error
+#     can never be moved or deleted by anyone, including an org owner.
+#
+#  2. NOTHING DEPENDS ON A WORKFLOW TRIGGERING A WORKFLOW. The job that decides
+#     the version is the job that publishes it, so no event has to propagate.
+#     For the same reason there is deliberately NO `on: push: tags` trigger
+#     anywhere in this repository: the tag is created by an App installation
+#     token, whose events DO start runs, so such a trigger would fire a second,
+#     duplicate release against a tag that already has one.
+#
+#  3. THIS WORKFLOW NEVER WRITES TO main. Not a commit, not a branch, not a
+#     file. That is why CHANGELOG.md is generated at release time and shipped in
+#     the archives rather than committed: a tracked file can only change on main
+#     through a pull request, so for as long as the version lived in a tracked
+#     file, a release needed one.
+
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+  # The sweep, and it is worth being exact about what it does and does not fix.
+  #
+  # It repairs anything that failed or skipped BEFORE the tag exists: a run that
+  # deferred to the tip and then that run failing, a red CI that has since gone
+  # green, a transient. Those are pure functions of the commit history, so
+  # running again is the whole repair. Without this, "a later run covers it" is
+  # a promise with no enforcement — the tip guard makes every run in a burst
+  # defer to the last one, and if THAT run dies nothing releases until somebody
+  # merges again and happens to notice.
+  #
+  # It does NOT repair anything that failed AFTER the un-draft. Once the tag
+  # exists and main's tip is the tagged commit, `git-cliff --bump --unreleased`
+  # returns the current tag with no commits, so plan decides there is nothing to
+  # release and the sweep is a no-op. The two failures that live in that window
+  # — the cask push (cask.Pipe is ContinueOnError, so goreleaser reports it
+  # after the release is already live) and the read-back verification steps —
+  # need the workflow_dispatch below, naming the tag. That is a manual step and
+  # this comment says so rather than implying otherwise.
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Resume the publish for a tag that ALREADY EXISTS (vX.Y.Z) — for a run
+          that died after its tag was created. Leave empty to release the tip of
+          main. A tag that does not already exist is refused: this input can
+          repair a release, never mint a version.
+        required: false
+        type: string
 
 permissions:
   contents: read
 
-# Never cancel a release in flight: a run interrupted between "create" and
-# "upload asset" leaves a published release with missing assets.
+# Serialise, never cancel. Between "create draft" and "un-draft" a cancelled run
+# would leave an orphaned draft release and a second run would create another.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-main
   cancel-in-progress: false
 
 jobs:
-  release:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write        # required to create the release and upload assets
+    timeout-minutes: 10
+    outputs:
+      publish: ${{ steps.decide.outputs.publish }}
+      version: ${{ steps.decide.outputs.version }}
+      sha: ${{ steps.decide.outputs.sha }}
+      resume: ${{ steps.decide.outputs.resume }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with: { fetch-depth: 0 }
+        with:
+          # `main` explicitly, for every event type: a schedule or a dispatch
+          # would otherwise land on whatever the event named. This is a branch
+          # checkout, not a detached HEAD.
+          ref: main
+          # git-cliff needs the whole history and every tag to compute a bump.
+          fetch-depth: 0
 
-      - name: The tag must be semver, and must match the version in the tool
+      - name: Install git-cliff
+        run: sudo ./scripts/install-git-cliff.sh
+
+      - name: Release the tip of main, or nothing
+        id: tip
         env:
-          REF: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
         run: |
-          tag="$REF"
-          # A case glob accepts v01.2.3 and v1.2.3-rc.1; this does not.
-          if ! printf '%s' "$tag" | grep -qE '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
-            echo "::error::tag is not a plain vMAJOR.MINOR.PATCH: $tag"
-            exit 1
+          set -eu
+          tip="$(git rev-parse HEAD)"
+          echo "sha=$tip" >>"$GITHUB_OUTPUT"
+          if [ "$EVENT" != "push" ] || [ "$tip" = "$GITHUB_SHA" ]; then
+            echo "current=true" >>"$GITHUB_OUTPUT"
+            exit 0
           fi
-          version="${tag#v}"
-          # CHANGELOG.md is the single source of truth: the version reaches the
-          # binary through -ldflags, so there is no constant in the source that
-          # could disagree with it.
-          declared="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -1)"
-          if [ "$version" != "$declared" ]; then
-            echo "::error::tag $tag disagrees with the newest CHANGELOG section ($declared)"
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_ENV"
+          # Three stacked pull requests merging in sequence produce three pushes,
+          # and the runs queue behind the concurrency group. Tagging the commit
+          # this run was triggered for would spend a version number on an
+          # intermediate state of a stack that nobody asked to ship — and that
+          # tag could never be withdrawn. The run for the current tip covers this
+          # work too, and the hourly sweep covers that run failing.
+          echo "::notice::main is at $tip, this run is for $GITHUB_SHA — a later run covers it"
+          echo "current=false" >>"$GITHUB_OUTPUT"
 
-      - name: The tag must point at a commit reachable from main
+      - name: CI must be green on the commit being released
+        id: ci
+        # The gate that removing the human took away. `on: push: main` starts
+        # this workflow IN PARALLEL with CI on the same push, and nothing here
+        # looked at a check run. Combined with strict_required_status_checks_policy
+        # being false, two pull requests each green against an older base can
+        # merge into a broken main and be published before the pandoc matrix, the
+        # TeX suite, shellcheck, actionlint, gitleaks or no-leaks.sh have run on
+        # the merged result. goreleaser's before-hooks are `go mod verify` and
+        # `go test ./...`, a strict subset of `make check`.
+        #
+        # Under the old flow the person pushing the tag was the thing that looked
+        # at main first. This replaces that, rather than simply dropping it.
+        #
+        # Queued or running is a SKIP, not a failure: the run that CI is still
+        # working on is covered by the sweep once its checks land. Only an
+        # actually-failed or missing ci-required stops the release.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.tip.outputs.sha }}
         run: |
+          set -eu
+          state=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs" \
+                    --jq '[.check_runs[] | select(.name == "ci-required")]
+                          | if length == 0 then "missing"
+                            elif any(.status != "completed") then "pending"
+                            elif all(.conclusion == "success") then "success"
+                            else "failed" end')
+          printf 'ci-required on %s: %s\n' "$SHA" "$state"
+          case "$state" in
+            success) echo "ok=true" >>"$GITHUB_OUTPUT" ;;
+            pending|missing)
+              echo "::notice::ci-required is $state on $SHA — the sweep releases it once CI lands"
+              echo "ok=false" >>"$GITHUB_OUTPUT" ;;
+            *)
+              echo "::error::ci-required failed on $SHA — refusing to release it"
+              exit 1 ;;
+          esac
+
+      - name: Derive the next version and its notes from the commit history
+        id: cliff
+        if: >-
+          steps.tip.outputs.current == 'true'
+          && steps.ci.outputs.ok == 'true'
+          && github.event.inputs.tag == ''
+        run: |
+          set -eu
+          # ONE invocation answers both questions, so the version and the notes
+          # cannot disagree: --bump computes the next semver from the unreleased
+          # commits under cliff.toml's rules, and --context is the same render
+          # the notes came from.
+          git-cliff --bump --unreleased --strip header >/tmp/release-notes.md
+          git-cliff --bump --unreleased --context >/tmp/context.json
+          version="$(jq -r '.[0].version // ""' /tmp/context.json)"
+          {
+            echo "version=$version"
+            echo "entries=$(grep -c '^- ' /tmp/release-notes.md || true)"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Decide whether there is a release here
+        id: decide
+        if: steps.tip.outputs.current == 'true' && steps.ci.outputs.ok == 'true'
+        env:
+          RESUME_TAG: ${{ github.event.inputs.tag }}
+          DERIVED: ${{ steps.cliff.outputs.version }}
+          ENTRIES: ${{ steps.cliff.outputs.entries }}
+          SHA: ${{ steps.tip.outputs.sha }}
+        run: |
+          set -eu
+          resume=false
+          sha="$SHA"
+
+          if [ -n "$RESUME_TAG" ]; then
+            # A resume may only ever point at a tag that ALREADY EXISTS. There is
+            # deliberately no way to name a version here: a free-text version
+            # input would let one `gh workflow run` mint a permanent v1.0.0 on a
+            # pre-1.0 repository, past every guard, with no way to take it back.
+            resume=true
+            version="${RESUME_TAG#v}"
+            peeled="$(git ls-remote origin "refs/tags/$RESUME_TAG^{}" | cut -f1)"
+            plain="$(git ls-remote origin "refs/tags/$RESUME_TAG" | cut -f1)"
+            sha="${peeled:-$plain}"
+            [ -n "$sha" ] || { echo "::error::$RESUME_TAG does not exist on origin — this input resumes a release, it cannot create one"; exit 1; }
+            git merge-base --is-ancestor "$sha" HEAD \
+              || { echo "::error::$RESUME_TAG points at $sha, which is not an ancestor of main"; exit 1; }
+            echo "::notice::resuming the publish for $RESUME_TAG at $sha"
+          else
+            version="${DERIVED#v}"
+          fi
+
+          latest="$(git tag -l 'v[0-9]*' --sort=-v:refname | head -1)"
+          printf 'derived=%s resume=%s latest=%s entries=%s sha=%s\n' \
+            "${DERIVED:-<none>}" "$resume" "${latest:-<none>}" "${ENTRIES:-0}" "$sha"
+
+          # A case glob accepts v01.2.3 and v1.2.3-rc.1; this does not.
+          printf '%s' "$version" \
+            | grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+            || { echo "::error::not a plain MAJOR.MINOR.PATCH: '$version'"; exit 1; }
+
+          publish=true
+          if [ "$resume" = true ]; then
+            :
+          elif [ "v$version" = "$latest" ]; then
+            # git-cliff echoes the current tag back and warns "there is nothing
+            # to bump" when no commit since the newest tag is releasable.
+            publish=false
+            echo "::notice::nothing to bump — v$version is already the newest tag"
+          elif [ "${ENTRIES:-0}" -lt 1 ]; then
+            # The same rule twice, because both matter: no entries means nothing
+            # a reader would call a release, and nothing to put in the body.
+            # cliff.toml skips ^ci and ^build(deps, so a Dependabot-only stretch
+            # of main correctly releases nothing — verified.
+            publish=false
+            echo "::notice::no changelog entries since ${latest:-the first commit}"
+          elif git rev-parse -q --verify "refs/tags/v$version" >/dev/null 2>&1; then
+            echo "::error::tag v$version already exists — refusing to re-cut it"
+            echo "::error::to finish a release that died after its tag was created, re-run with the tag input"
+            exit 1
+          fi
+
+          {
+            echo "publish=$publish"
+            echo "version=$version"
+            echo "resume=$resume"
+            echo "sha=$sha"
+          } >>"$GITHUB_OUTPUT"
+
+  publish:
+    needs: plan
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # A GitHub environment whose deployment branch policy names main only is what
+    # stops someone pushing a branch that carries an edited copy of this workflow
+    # and minting the release token from it. Deliberately NO required reviewers:
+    # a human click here would undo the point of the design.
+    environment: release
+    permissions:
+      # GITHUB_TOKEN only reads. Every write below is done with an App
+      # installation token, minted per job and expiring within the hour.
+      contents: read
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: v${{ needs.plan.outputs.version }}
+      PLANNED: ${{ needs.plan.outputs.sha }}
+      RESUME: ${{ needs.plan.outputs.resume }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0
+
+      - name: The commit must still be the one that was planned
+        run: |
+          set -eu
+          have="$(git rev-parse HEAD)"
+          [ "$have" = "$PLANNED" ] \
+            || { echo "::error::checked out $have, planned $PLANNED"; exit 1; }
           git fetch --quiet origin main
-          # Release only what is on the mainline. A tag on a side branch would
-          # publish code that never passed the default-branch gate.
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
-            || { echo "::error::tagged commit is not an ancestor of main"; exit 1; }
+          git merge-base --is-ancestor "$PLANNED" origin/main \
+            || { echo "::error::$PLANNED is not an ancestor of main"; exit 1; }
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: Generate the release notes from the commit history
-        # git-cliff, not an awk over a hand-written file: the history is the
-        # single source. Squash-merging puts each pull request's description into
-        # the commit body, and cliff.toml renders bodies, so the notes carry the
-        # full prose rather than a list of subjects.
-        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5  # v4.8.0
-        id: cliff
-        with:
-          config: cliff.toml
-          # --current, not --unreleased. This workflow is triggered BY a tag
-          # push, so by the time it runs the tag exists and nothing is
-          # "unreleased" — that flag yields the version heading and no entries.
-          # --current selects the release containing the tagged commit.
-          args: --current --strip header
-        env:
-          OUTPUT: /tmp/release-notes.md
+      - name: Install git-cliff
+        run: sudo ./scripts/install-git-cliff.sh
 
-      - name: The notes must contain entries
+      - name: Rehearse THIS release against a mock GitHub
+        # The last gate before the irreversible step, and the reason this can run
+        # unattended at all: build every platform, create the release, upload
+        # every asset and push the cask against a socket on loopback, then assert
+        # on what goreleaser actually sent — including that the release is
+        # created as a draft, names this exact commit, and is un-drafted only
+        # after the last asset, which is what keeps the version number unspent
+        # until the end. Same script as `make release-dryrun`, at the exact
+        # version about to be published; a rehearsal at a different version is
+        # theatre.
+        run: ./tests/release-dryrun.sh --version "$VERSION"
+
+      - name: Mint a token that may write to THIS repository
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: schriftsatz
+          # Narrower than the App itself: this token may write contents and
+          # nothing else, lives one hour, and is revoked when the job ends — so
+          # there is nothing to rotate on a schedule.
+          permission-contents: write
+
+      - name: Mint a token that may write ONLY to the tap
+        id: tap
+        # A second, separately scoped token rather than one covering both. The
+        # release token must not be able to write to the tap and vice versa;
+        # HOMEBREW_TAP_TOKEN is tap-only today and this keeps it that way.
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+          permission-contents: write
+
+      - name: Clear any draft release left behind by a failed attempt
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
         run: |
+          set -eu
+          # A run that died between "create draft" and "un-draft" leaves a draft
+          # release and NO tag. goreleaser cannot find it again — GetReleaseByTag
+          # does not return drafts, and use_existing_draft is off — so it would
+          # create a SECOND draft for the same version. Delete it, and only ever
+          # a draft: deleting a published release is not something this workflow
+          # may do.
+          ids="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+                   --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id")"
+          for id in $ids; do
+            echo "::notice::deleting orphaned draft release $id for $TAG"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done
+
+      - name: Tag locally — this tag is never pushed
+        run: |
+          set -eu
+          # goreleaser reads {{ .Version }} from the tag, and git-cliff --current
+          # selects the commits it covers. Annotated, matching exactly what
+          # tests/release-dryrun.sh creates in its throwaway clone. On a resume
+          # the tag was already fetched with the history and points here already.
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            [ "$(git rev-parse "$TAG^{commit}")" = "$PLANNED" ] \
+              || { echo "::error::$TAG exists and does not point at $PLANNED"; exit 1; }
+            echo "::notice::$TAG already exists at $PLANNED — resuming"
+          else
+            git config user.name  'schriftsatz-release[bot]'
+            git config user.email 'schriftsatz-release[bot]@users.noreply.github.com'
+            git tag -a "$TAG" -m "$TAG"
+          fi
+
+      - name: Generate the release notes
+        run: |
+          set -eu
+          # --current, not --unreleased: the tag exists locally by now, so
+          # nothing is "unreleased" and that flag yields a version heading with
+          # no entries. That is bug #14, and it shipped an empty release body.
+          git-cliff --current --strip header >/tmp/release-notes.md
           # Count ENTRIES, not bytes. v0.1.0 shipped an empty body past a `-s`
-          # check because git-cliff emitted a version heading and nothing else:
-          # 23 bytes, zero entries, and -s is true for any non-empty file.
-          entries=$(grep -c '^- ' /tmp/release-notes.md || true)
+          # check because git-cliff emitted a heading and nothing else.
+          entries="$(grep -c '^- ' /tmp/release-notes.md || true)"
           if [ "${entries:-0}" -lt 1 ]; then
-            echo "::error::git-cliff produced no entries for $version"
-            echo "--- what it produced ---"; cat /tmp/release-notes.md
-            exit 1
+            echo "::error::git-cliff produced no entries for $TAG"
+            echo "--- what it produced ---"; cat /tmp/release-notes.md; exit 1
           fi
           echo "$entries entries"
-          echo "--- notes ---"; cat /tmp/release-notes.md
+
+      - name: Generate CHANGELOG.md for the archives
+        # Generated, gitignored, and shipped in the tarballs rather than
+        # committed — see property 3 in the header. Generated AFTER the tag
+        # exists, so it contains the release being cut rather than lagging it by
+        # the commit that regenerated it.
+        run: |
+          set -eu
+          git-cliff >CHANGELOG.md
+          grep -q "^## \[$VERSION\]" CHANGELOG.md \
+            || { echo "::error::generated CHANGELOG.md has no [$VERSION] section"; exit 1; }
+
+      - name: main must not have moved
+        id: stillcurrent
+        if: env.RESUME != 'true'
+        run: |
+          set -eu
+          # Re-checked here, seconds before the API call rather than ten minutes
+          # before, because of a documented behaviour of the release endpoints:
+          # if the commit named by target_commitish adds or modifies anything
+          # under .github/workflows/ RELATIVE TO THE DEFAULT BRANCH, the token
+          # must be authorized to modify workflows or the call returns 404. While
+          # this commit IS the tip of main that difference is empty and the
+          # question never arises. If main has moved, stop here — before the
+          # release exists — rather than meeting an opaque 404 mid-publish.
+          git fetch --quiet origin main
+          tip="$(git rev-parse origin/main)"
+          if [ "$tip" = "$PLANNED" ]; then
+            echo "ok=true" >>"$GITHUB_OUTPUT"
+          else
+            # A SKIP, not a failure. This repository exists to be merged into
+            # quickly, and a release takes minutes; on a busy afternoon main
+            # moves while a publish is in flight, which is normal rather than
+            # wrong. Failing here would make the ordinary case a red release run,
+            # and a treadmill of red release runs is how people learn to ignore
+            # release failures — the exact dynamic that let two empty releases
+            # ship. Nothing is lost by stopping: no tag, no version spent, and
+            # the run for the new tip publishes this work along with the rest.
+            echo "::notice::main moved from $PLANNED to $tip — the run for the new tip releases this work"
+            echo "ok=false" >>"$GITHUB_OUTPUT"
+          fi
 
       - name: Publish with goreleaser
-        # goreleaser builds every platform, checksums them, creates the release
-        # and pushes the Homebrew cask to cronai-labs/homebrew-tap. It replaces
-        # a hand-rolled tarball step, so the packaging path is exercised on
-        # every release rather than first tested when one is needed.
+        # Everything from here is irreversible, so all of it hangs on the
+        # same condition: this commit is still the tip of main (or we are
+        # resuming a tag that already exists). Without the gate the skip above
+        # would be advisory and the publish would proceed anyway.
+        if: env.RESUME == 'true' || steps.stillcurrent.outputs.ok == 'true'
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
-          # Pinned in .tool-versions, which tests/release-dryrun.sh reads to pick
-          # its container image. A rehearsal against a different goreleaser than
-          # the one that publishes is not a rehearsal, and the two drifting apart
-          # is exactly what nobody notices until a release. One file, one bump.
+          # One file pins goreleaser for this workflow, for
+          # tests/release-dryrun.sh and for mise/asdf. Rehearsing with a
+          # different goreleaser than the one that publishes is not a rehearsal,
+          # and a version regexed out of YAML is a fragile way to keep them
+          # together.
           version-file: .tool-versions
           args: release --clean --release-notes=/tmp/release-notes.md
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          # A token scoped to the tap repository only. The default GITHUB_TOKEN
-          # cannot push to another repository, and widening it would give every
-          # workflow in this repo write access to the tap.
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+          HOMEBREW_TAP_TOKEN: ${{ steps.tap.outputs.token }}
 
-      - name: The PUBLISHED release must actually carry the notes
-        # Verify the outcome, not the input. The previous guard checked the
-        # notes FILE — goreleaser's input — and passed while goreleaser went on
-        # to publish an empty body, so two releases in a row shipped empty past
-        # a check meant to prevent exactly that. Read back what GitHub now
-        # serves; nothing downstream can fool this.
+      - name: The tag, the notes and every asset must be there
+        # Everything from here is irreversible, so all of it hangs on the
+        # same condition: this commit is still the tip of main (or we are
+        # resuming a tag that already exists). Without the gate the skip above
+        # would be advisory and the publish would proceed anyway.
+        if: env.RESUME == 'true' || steps.stillcurrent.outputs.ok == 'true'
+        # Verify the OUTCOME, not the input. A guard that checked goreleaser's
+        # input file passed twice while goreleaser published an empty body.
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
         run: |
-          body=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
-          entries=$(printf '%s\n' "$body" | grep -c '^- ' || true)
-          printf 'published body: %s bytes, %s entries\n' "$(printf '%s' "$body" | wc -c | tr -d ' ')" "${entries:-0}"
-          if [ "${entries:-0}" -lt 1 ]; then
-            echo "::error::the published release body carries no entries"
-            printf -- '--- what was published ---\n%s\n' "$body"
-            exit 1
-          fi
+          set -eu
+          # ls-remote, NOT `git fetch refs/tags/X:refs/tags/X`. This job holds an
+          # ANNOTATED tag locally while GitHub creates a LIGHTWEIGHT one, so that
+          # refspec is a non-fast-forward and git rejects it with "would clobber
+          # existing tag" — turning every successful release into a red run.
+          peeled="$(git ls-remote origin "refs/tags/$TAG^{}" | cut -f1)"
+          plain="$(git ls-remote origin "refs/tags/$TAG" | cut -f1)"
+          got="${peeled:-$plain}"
+          [ -n "$got" ] || { echo "::error::$TAG does not exist on origin"; exit 1; }
+          [ "$got" = "$PLANNED" ] \
+            || { echo "::error::$TAG points at $got, not $PLANNED"; exit 1; }
+
+          json="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body,isDraft,assets)"
+          body="$(printf '%s' "$json"   | jq -r .body)"
+          draft="$(printf '%s' "$json"  | jq -r .isDraft)"
+          assets="$(printf '%s' "$json" | jq '.assets | length')"
+          entries="$(printf '%s\n' "$body" | grep -c '^- ' || true)"
+          printf 'tag=%s draft=%s assets=%s entries=%s bytes=%s\n' \
+            "$got" "$draft" "$assets" "${entries:-0}" \
+            "$(printf '%s' "$body" | wc -c | tr -d ' ')"
+          [ "$draft" = false ]      || { echo "::error::the release is still a draft"; exit 1; }
+          [ "$assets" -eq 5 ]       || { echo "::error::expected 5 assets, found $assets"; exit 1; }
+          [ "${entries:-0}" -ge 1 ] || { echo "::error::the published body carries no entries"; exit 1; }
+
+      - name: The tap must serve this version
+        # Everything from here is irreversible, so all of it hangs on the
+        # same condition: this commit is still the tip of main (or we are
+        # resuming a tag that already exists). Without the gate the skip above
+        # would be advisory and the publish would proceed anyway.
+        if: env.RESUME == 'true' || steps.stillcurrent.outputs.ok == 'true'
+        # The last leg the rehearsal cannot prove. It proves the cask CONTENT is
+        # right; only this proves it landed. A release whose cask silently failed
+        # to push is a release nobody can install.
+        env:
+          GH_TOKEN: ${{ steps.tap.outputs.token }}
+        run: |
+          set -eu
+          gh api "repos/$GITHUB_REPOSITORY_OWNER/homebrew-tap/contents/Casks/schriftsatz.rb" \
+            --jq .content | base64 -d | grep -q "version \"$VERSION\"" \
+            || { echo "::error::the tap does not carry $VERSION — re-run with the tag input to repair it"; exit 1; }
+          echo "the tap serves $VERSION"

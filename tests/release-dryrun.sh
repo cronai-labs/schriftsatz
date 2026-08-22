@@ -58,15 +58,51 @@ if ! command -v docker >/dev/null; then
 fi
 
 # The version the release WOULD carry, from the single source of truth.
-VERSION=${VERSION_OVERRIDE:-$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -1)}
-if [ -z "$VERSION" ]; then echo "release-dryrun: no version in CHANGELOG.md"; exit 1; fi
+# The version this rehearsal publishes. No tracked file records a version any
+# more — the commit history does, and git-cliff is the function from one to the
+# other. The release workflow passes --version so the rehearsal runs at exactly
+# the version it is about to cut; a rehearsal at a different version is theatre.
+VERSION=$VERSION_OVERRIDE
+SYNTHETIC=0
+if [ -z "$VERSION" ]; then
+  VERSION=$(docker run --rm -v "$REPO":/repo -w /repo "$CLIFF_IMAGE" \
+              --bump --unreleased --context 2>/dev/null \
+            | python3 "$REPO/tests/bumped-version.py" || true)
+  # On a pull request the checkout is refs/pull/N/merge, whose branch commits
+  # are not conventional-commit-linted — only the PR TITLE is, and that title
+  # does not exist as a commit until the squash. A branch of "wip" commits
+  # therefore yields nothing to bump and git-cliff echoes the current tag back.
+  # Rehearsing an already-published version would be misleading, so fall back to
+  # a synthetic patch bump and say so: what this proves is the MECHANICS of
+  # publishing, and every assertion below is built from $VERSION.
+  latest=$(git -C "$REPO" tag -l 'v[0-9]*' --sort=-v:refname | head -1 | sed 's/^v//')
+  if [ -z "$VERSION" ] || { [ -n "$latest" ] && [ "$VERSION" = "$latest" ]; }; then
+    if [ -n "$latest" ]; then
+      VERSION="${latest%.*}.$(( ${latest##*.} + 1 ))"
+    else
+      # No tags at all. Without this the arithmetic below yields ".1", which
+      # then fails the semver check with a confusing message.
+      VERSION="0.0.1"
+    fi
+    SYNTHETIC=1
+    echo "release-dryrun: nothing releasable here — rehearsing the mechanics at $VERSION"
+  fi
+fi
+VERSION=${VERSION#v}
+printf '%s' "$VERSION" | grep -qE '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+  || { echo "release-dryrun: not a plain MAJOR.MINOR.PATCH: '$VERSION'"; exit 1; }
 TAG="v$VERSION"
 
 # Deliberately inside build/, not mktemp -d. Docker Desktop on macOS shares only
 # a few host paths, and the private temp directory mktemp returns is not one of
 # them — the mount silently produces an empty directory rather than an error.
 # build/ is already gitignored and already what `make clean` removes.
-WORK=$REPO/build/dryrun
+# A FRESH directory per run, not a fixed path. Reusing one meant `rm -rf`
+# followed immediately by a bind mount of the same inode, and on macOS the
+# container then sees the PREVIOUS run's tree — goreleaser dies with
+# "readdirent dist: no such file or directory" or, worse, rehearses against
+# stale files. Reproduced by running this twice in a row.
+WORK=$REPO/build/dryrun/$$
 cleanup () {
   # On Linux the container runs as root, so everything it wrote into the bind
   # mount is root-owned and the calling user cannot delete it — the rehearsal
@@ -79,6 +115,8 @@ cleanup () {
   fi
   if [ "$KEEP" -eq 1 ]; then echo "kept: $WORK"; return 0; fi
   rm -rf "$WORK"
+  # Tidy the parent when this was the last run; harmless if another is active.
+  rmdir "$REPO/build/dryrun" 2>/dev/null || true
 }
 trap cleanup EXIT
 rm -rf "$WORK"; mkdir -p "$WORK/out"
@@ -155,6 +193,22 @@ if [ "$cliff_ok" -ne 1 ]; then
   exit 1
 fi
 echo "  notes: $(wc -c <"$WORK/notes.md" | tr -d ' ') bytes, $(grep -c '^- ' "$WORK/notes.md" || true) entries"
+
+# CHANGELOG.md is generated at release time and shipped in the archives rather
+# than committed, so a fresh clone does not have one.
+#
+# Measured, because the two cases differ and it matters: goreleaser only WARNS
+# on a `files` GLOB that matches nothing — which is how docs/**/* shipped empty
+# tarballs — but it hard-ERRORS on a missing literal filename:
+#
+#   failed to find files to archive: globbing failed for pattern CHANGELOG.md:
+#   matching "./CHANGELOG.md": file does not exist
+#
+# So this is protected twice over: goreleaser refuses to build the archive at
+# all, and the assertion below would catch it if that ever softened.
+docker run --rm -v "$WORK/src":/repo -w /repo "$CLIFF_IMAGE" \
+  --tag "$TAG" -o CHANGELOG.md >/dev/null 2>&1 || true
+git -C "$WORK/src" update-index --skip-worktree CHANGELOG.md 2>/dev/null || true
 
 # The real config, plus an endpoint override. Deriving it rather than editing
 # .goreleaser.yaml keeps the shipped config the thing under test: the changelog
@@ -248,6 +302,14 @@ EOF
     test "${body_entries:-0}" -ge 1
   check "the release body is exactly the generated notes" \
     test "${body_matches}" = "True"
+  if [ "$SYNTHETIC" -eq 1 ]; then
+    # Be honest about what that last assertion proved here. With nothing
+    # releasable, the notes are the PREVIOUS release's, so this compared the
+    # mock's round-trip of them against themselves — it proves the payload
+    # survives the wire, not that a render is correct. The real render is
+    # exercised on main, where there is something to release.
+    echo "  note synthetic version: the notes were not re-rendered, only round-tripped"
+  fi
 fi
 
 # ── The ordering IS the safety property ─────────────────────────────────────
