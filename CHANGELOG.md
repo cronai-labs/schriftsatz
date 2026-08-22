@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-22
+
 ### Changed
 
 - **The CLI is a Go binary** rather than a shell script, and embeds its Lua filters and LaTeX
@@ -24,8 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--list-assets` / `--print-asset` to read the embedded filters and styles.
 - Homebrew cask via goreleaser, published to `cronai-labs/homebrew-tap`.
 - An agent skill at `skills/schriftsatz/`, installable with `npx skills add`.
-
-## [0.1.0] - 2026-08-19
 
 First extraction from a private, working pipeline.
 
