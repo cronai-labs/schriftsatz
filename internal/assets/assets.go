@@ -24,6 +24,7 @@ var files embed.FS
 const (
 	FilterTableWidths = "filters/table-widths.lua"
 	FilterLinebreaks  = "filters/linebreaks.lua"
+	FilterTextLayer   = "filters/text-layer.lua"
 	StyleTextLayer    = "styles/text-layer.tex"
 	StyleLineBreaking = "styles/linebreaking.tex"
 	StyleFormal       = "styles/formal.tex"
@@ -34,8 +35,10 @@ const (
 var DefaultStyles = []string{StyleTextLayer, StyleLineBreaking}
 
 // Filters always run, in this order. linebreaks must come after table-widths so
-// the width measurement sees undivided tokens.
-var Filters = []string{FilterTableWidths, FilterLinebreaks}
+// the width measurement sees undivided tokens. text-layer touches only Meta, so
+// its position is free; it is first because it is the guarantee the others are
+// built on top of.
+var Filters = []string{FilterTextLayer, FilterTableWidths, FilterLinebreaks}
 
 // Materialise writes every embedded asset into dir, preserving layout, and
 // returns a map from asset name to its absolute path.

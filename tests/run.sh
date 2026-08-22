@@ -318,6 +318,55 @@ else
   printf '  skip Inter not installed — cannot exercise the text-layer fix\n'
 fi
 
+step "the calt fix reaches a font set in FRONT MATTER"
+# The ordering nobody tested. pandoc emits header-includes after its own font
+# block, so \defaultfontfeatures in text-layer.tex arrives too late for a
+# typeface named as `mainfont:` — and every other assertion in this suite sets
+# the font in a second -H file, which is the one ordering where the fragment
+# does apply. filters/text-layer.lua covers this one.
+if kpsewhich Inter-Regular.otf >/dev/null 2>&1 || fc-list 2>/dev/null | grep -qi 'Inter-Regular'; then
+  printf -- '---\ntitle: t\nmainfont: Inter-Regular.otf\n---\n\nMaterialaufwand −123,45 (Klammer)\n' > "$t/fm.md"
+  "$SS" "$t/fm.md" -o "$t/fm.pdf" >/dev/null 2>&1
+  got=$(pdftotext "$t/fm.pdf" - 2>/dev/null | tr -d '[:space:]')
+  case "$got" in *"−123,45"*) ok "minus survives a front-matter mainfont" ;;
+                 *) bad "minus LOST — the fix does not reach a front-matter font" ;; esac
+  case "$got" in *"(Klammer)"*) ok "parentheses survive" ;;
+                 *) bad "parentheses lost" ;; esac
+  # Negative control: the fragment ALONE must still fail, or this is measuring
+  # nothing and the filter could be removed without a test noticing.
+  pandoc "$t/fm.md" --pdf-engine=xelatex -H "$t/emb-text-layer.tex" -o "$t/fm-none.pdf" >/dev/null 2>&1
+  none=$(pdftotext "$t/fm-none.pdf" - 2>/dev/null | tr -d '[:space:]')
+  case "$none" in *"−123,45"*) bad "control: the defect did not reproduce with the fragment alone" ;;
+                  *) ok "control: the fragment alone does not reach it" ;; esac
+else
+  printf '  skip Inter not installed — cannot exercise the front-matter ordering\n'
+fi
+
+step "font options written in front matter survive"
+# Metadata is parsed as Markdown, so the LaTeX writer escaped the braces:
+# `Numbers={Proportional,Lining}` became `Numbers=\{Proportional,Lining\}` and
+# the build died. Most font options worth setting carry braces.
+printf -- '---\ntitle: t\nmainfont: Inter-Regular.otf\nmainfontoptions:\n  - "Numbers={Proportional,Lining}"\n---\n\nx\n' > "$t/opt.md"
+if "$SS" "$t/opt.md" --keep-tex -o "$t/opt.pdf" >/dev/null 2>&1 \
+   && grep -q 'Numbers={Proportional,Lining}' "$t/opt.tex" 2>/dev/null; then
+  ok "braces in a font option reach the preamble unescaped"
+else bad "a font option with braces did not survive front matter"; fi
+# The documented escape hatch — case-sensitive punctuation back on a face whose
+# text is never extracted — must not be silently overridden. fontspec takes the
+# LAST setting, so appending would win.
+printf -- '---\ntitle: t\nmainfont: Inter-Regular.otf\nmainfontoptions:\n  - "RawFeature={+calt}"\n---\n\nx\n' > "$t/plus.md"
+"$SS" "$t/plus.md" --keep-tex -o "$t/plus.pdf" >/dev/null 2>&1
+# Read the \setmainfont line only: text-layer.tex is included by -H and its
+# comments discuss -calt at length, so grepping the whole file always matches.
+# Anchored on leading whitespace rather than extracting the bracketed options,
+# because a negated bracket expression looks like a wikilink to no-leaks.sh.
+setline=$(grep -m1 '^[[:space:]]*\\setmainfont' "$t/plus.tex" 2>/dev/null)
+case "$setline" in
+  *'-calt'*) bad "an explicit +calt was overridden ($setline)" ;;
+  *'+calt'*) ok "an explicit +calt is left alone" ;;
+  *)         bad "no \\setmainfont options found ($setline)" ;;
+esac
+
 step "verify: usable by a reader on their own PDF"
 if pandoc "$t/tl.md" --pdf-engine=xelatex -H "$t/tl.tex" -o "$t/tl-bad.pdf" >/dev/null 2>&1 \
    && [ -s "$t/tl.pdf" ]; then
