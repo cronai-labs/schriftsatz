@@ -623,6 +623,23 @@ if grep -q 'fancyhdr' "$t/nohouse.tex" 2>/dev/null; then
   bad "control: a document with no imprint got page furniture anyway"
 else ok "control: no imprint, no page furniture"; fi
 
+step "house style: the letterhead, and its height"
+# A built PDF stands in for a logo — \includegraphics takes one, and generating
+# it here avoids committing a binary fixture for a two-line assertion.
+printf -- '---\ntitle: LOGOMARK\n---\n\nlogo\n' > "$t/logo.md"
+"$SS" "$t/logo.md" -o "$t/logo.pdf" >/dev/null 2>&1
+printf -- '---\ntitle: t\nletterhead: %s\nletterhead-height: 12mm\n---\n\n\\docletterhead\n\nBody.\n' \
+  "$t/logo.pdf" > "$t/lh.md"
+if "$SS" "$t/lh.md" --keep-tex -o "$t/lh.pdf" >/dev/null 2>&1; then
+  # The generated command only, not formal.tex's commented example of one.
+  if grep -q 'includegraphics\[height=12mm\]' "$t/lh.tex" 2>/dev/null; then
+    ok "letterhead-height overrides the default"
+  else bad "letterhead-height was ignored"; fi
+  txt=$(pdftotext "$t/lh.pdf" - 2>/dev/null)
+  case "$txt" in *LOGOMARK*) ok "the letterhead is drawn onto the page" ;;
+                 *) bad "the letterhead did not reach the page" ;; esac
+else bad "the letterhead build failed"; fi
+
 step "--metadata-file: the document still wins, and a missing file is a usage error"
 # Same precedence as everywhere else: defaults < house style < document.
 printf -- '---\ntitle: t\nimprint:\n  - "From the document"\n---\n\nx\n' > "$t/own.md"
