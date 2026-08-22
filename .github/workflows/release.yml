@@ -29,7 +29,20 @@ name: Release
 #     file, a release needed one.
 
 on:
-  push:
+  # AFTER CI, not alongside it. `on: push: branches: [main]` started this
+  # workflow at the same instant as CI on the same commit, so the check-run gate
+  # below found ci-required "missing" every single time and every run skipped —
+  # observed on the first two attempts. Releases then depended entirely on the
+  # hourly sweep, which GitHub schedules on a best-effort basis and delayed past
+  # 20 minutes here. "Merging publishes" has to mean minutes, not eventually.
+  #
+  # workflow_run fires when CI finishes, so ci-required exists and has a verdict
+  # by the time plan looks. It also runs the copy of this file on the DEFAULT
+  # branch, and carries github.ref = the default branch, so the release
+  # environment's main-only deployment policy still admits it.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   # The sweep, and it is worth being exact about what it does and does not fix.
   #
@@ -73,6 +86,13 @@ concurrency:
 
 jobs:
   plan:
+    # A failed CI run must not even plan. The check-run query below is the
+    # authoritative gate — it names ci-required specifically — but there is no
+    # reason to spend a runner deriving a version for a commit that is already
+    # known bad.
+    if: >-
+      github.event_name != 'workflow_run'
+      || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -96,12 +116,14 @@ jobs:
       - name: Release the tip of main, or nothing
         id: tip
         env:
-          EVENT: ${{ github.event_name }}
+          # Only workflow_run carries the commit that triggered it. A schedule or
+          # a dispatch has none, and for those the tip IS what we mean to release.
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -eu
           tip="$(git rev-parse HEAD)"
           echo "sha=$tip" >>"$GITHUB_OUTPUT"
-          if [ "$EVENT" != "push" ] || [ "$tip" = "$GITHUB_SHA" ]; then
+          if [ -z "${TRIGGER_SHA:-}" ] || [ "$tip" = "$TRIGGER_SHA" ]; then
             echo "current=true" >>"$GITHUB_OUTPUT"
             exit 0
           fi
@@ -111,7 +133,7 @@ jobs:
           # intermediate state of a stack that nobody asked to ship — and that
           # tag could never be withdrawn. The run for the current tip covers this
           # work too, and the hourly sweep covers that run failing.
-          echo "::notice::main is at $tip, this run is for $GITHUB_SHA — a later run covers it"
+          echo "::notice::main is at $tip, this run is for $TRIGGER_SHA — a later run covers it"
           echo "current=false" >>"$GITHUB_OUTPUT"
 
       - name: CI must be green on the commit being released
