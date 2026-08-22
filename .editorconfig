@@ -13,17 +13,20 @@ insert_final_newline = true
 trim_trailing_whitespace = true
 charset = utf-8
 
-# Make requires literal tabs to introduce a recipe line; spaces are a syntax
-# error, and an editor that helpfully converts them breaks the build.
-[Makefile]
-indent_style = tab
-
-# Deliberately no indent rule for Go. gofmt indents with tabs and then ALIGNS
-# with spaces — inside var blocks, struct literals and trailing comments — so
-# editorconfig-checker reports gofmt's own output as wrong indentation (23
-# findings in cmd/schriftsatz/main.go alone). gofmt is authoritative and is
-# enforced by golangci-lint's gofmt formatter; two tools disagreeing about the
-# same file is how a gate gets switched off.
+# Deliberately NO indent_style anywhere, including for Make and Go, where tabs
+# are genuinely required. editorconfig-checker reads "tab, then spaces" as mixed
+# indentation, and that is the correct and unavoidable shape in both:
+#
+#   Makefile   a recipe line must begin with a tab, and its shell continuations
+#              are then aligned with spaces for readability — 16 findings
+#   *.go       gofmt indents with tabs and aligns with spaces inside var blocks,
+#              struct literals and trailing comments — 23 findings in one file
+#
+# Both are already enforced, and more strictly than this could: a space-indented
+# recipe line is a hard make syntax error, and gofmt is checked by golangci-lint.
+# Asserting it a second time only produces findings whose only fix is to break
+# the file. Two tools disagreeing about the same line is how a gate gets
+# switched off entirely.
 
 # Markdown uses trailing double-space as a hard line break in some places.
 [*.md]
