@@ -99,8 +99,13 @@ paths=$(scan '/(Users|home)/[a-z]' || true)
 
 # ── 5. Personal mail addresses ───────────────────────────────────────────────
 # The published contact address is a role address on the company domain.
+# bot@goreleaser.com is goreleaser's own published commit-author default. It
+# reaches CHANGELOG.md legitimately: the changelog is generated from commit
+# bodies, and the commit that fixed this scanner quoted its own output, which
+# named that address. It is a documented role address of a tool this project
+# uses — exactly what this rule's exemption is for — not a personal one.
 mail=$(scan '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' \
-       | grep -vE 'security@|noreply@|example\.(com|org)|@commitlint' || true)
+       | grep -vE 'security@|noreply@|example\.(com|org)|@commitlint|bot@goreleaser\.com' || true)
 [ -n "$mail" ] && flag "mail address that is not a documented role address" "$mail"
 
 # ── 6. German bookkeeping account codes ──────────────────────────────────────

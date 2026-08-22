@@ -11,6 +11,222 @@ the single commit that regenerated it — a commit cannot describe itself. The
 **GitHub release notes are authoritative**: they are generated from the history
 at the moment the tag is pushed, and are complete.
 
+## [0.1.1] - 2026-08-22
+
+
+### Fixed
+
+- **Use --current, and assert entries rather than bytes (#14)**
+
+`v0.1.0` shipped an empty body past a step whose entire purpose was
+preventing that.
+
+`--unreleased` means *commits not contained in any tag* — and this
+workflow is triggered **by
+a tag push**, so the tag exists when it runs. I verified it locally
+before tagging, the one
+environment where the flag is correct.
+
+| flags (tag present) | bytes | entries |
+|---|---|---|
+| `--unreleased --tag v0.1.0` | 23 | **0** |
+| `--current` | 7362 | 8 |
+
+The guard was `[ ! -s ]` — true for any non-empty file — so a bare
+version heading passed it.
+It now counts entries and prints what it got on failure.
+
+#### Verified both directions
+
+```
+old output: bytes=26   entries=0  -> CAUGHT
+new output: bytes=7366 entries=18 -> passes
+```
+
+The published v0.1.0 notes are already repaired (1 → 7325 bytes).
+
+- [x] `make check`, actionlint clean
+
+
+- **Strip the quarantine attribute so the cask is runnable (#16)**
+
+`brew install --cask cronai-labs/tap/schriftsatz` succeeds, and then:
+
+```
+$ schriftsatz --version
+$ echo $?
+137
+```
+
+No output. 137 is SIGKILL — Gatekeeper kills it before `main()`, so the
+program cannot report
+its own failure.
+
+#### It is not a broken signature
+
+Go's linker ad-hoc signs the cross-compiled binaries and that signature
+is valid:
+
+```
+CodeDirectory v=20400 flags=0x20002(adhoc,linker-signed)
+$ codesign -v … ; echo $?
+0
+```
+
+Homebrew tags cask downloads with `com.apple.quarantine`, and Gatekeeper
+rejects an
+ad-hoc-signed, non-notarized binary — `spctl -a -t exec` says
+`rejected`.
+
+#### Proof
+
+Byte-identical copies, same sha256, differing only in one extended
+attribute:
+
+| binary | xattrs | result |
+|---|---|---|
+| as installed | `com.apple.quarantine` | **exit 137 (SIGKILL)**, no
+output |
+| `cp` + `xattr -c` | none | `schriftsatz 0.1.0`, exit 0 |
+
+#### The tradeoff, stated rather than buried
+
+Stripping the attribute removes Gatekeeper's check that the binary comes
+from an identified
+developer. The correct fix is Developer ID signing plus notarization
+(paid Apple account) —
+filed separately. Until then this hook is what makes the cask function,
+and users are trusting
+this tap directly.
+
+#### New `package` job
+
+Builds the real artifacts on every PR and asserts the **generated** cask
+carries the hook — a
+config can hold a hook that fails to render, so only the output is
+evidence. Feeds
+`ci-required`.
+
+- [x] Negative-controlled: hook present → passes; hook removed → fails
+on the missing `postflight`
+- [x] `make check`, actionlint clean
+
+#### Not fixed here
+
+Two further defects this run surfaced, each filed on its own:
+- goreleaser warns `glob=docs/**/*` matched nothing — the release
+tarballs ship without any docs
+- `no-leaks.sh` scans gitignored `dist/`, so `make check` fails for
+anyone who has built
+
+
+- **Ship the documentation in the archives (#20)**
+
+goreleaser has been warning on every single build, and it went unread:
+
+```
+• no files matched   glob=docs/**/*
+```
+
+The published v0.1.0 tarballs contain `CHANGELOG.md LICENSE README.md
+schriftsatz` — and none
+of `docs/`. The three writeups that are most of the reason this repo
+exists shipped in no
+artifact at all.
+
+#### Cause
+
+goreleaser matches with `gobwas/glob`, where `**` spans separators and
+the trailing `/*` then
+demands a literal `/` after it. So `docs/**/*` matches only at depth ≥
+2, and every doc is at
+depth 1. Measured by building the archive and listing it:
+
+| pattern | docs in tarball |
+|---|---|
+| `docs/**/*` (before) | **0** |
+| `docs/**` (after) | 3 |
+
+`docs/**` over `docs/*` so a future subdirectory is not dropped the same
+way.
+
+#### Guard
+
+goreleaser only *warns* on an unmatched glob — that is why this shipped.
+The `package` job now
+lists the real archive and asserts every tracked doc is present,
+enumerating
+`git ls-files 'docs/*'` rather than checking a count, since a count
+passes while a newly added
+doc goes missing.
+
+- [x] Zero `no files matched` warnings after the change
+- [x] Negative-controlled: a listing with `docs/table-widths.md` removed
+is caught
+- [x] `make check`, actionlint clean
+
+
+
+### Testing
+
+- **Scan publishable files, not the working directory (#21)**
+
+The scanner recursed the working directory, so it swept in gitignored
+build output:
+
+```
+$ goreleaser release --snapshot
+$ make check
+LEAK mail address that is not a documented role address
+       ./dist/config.yaml:18:      email: bot@goreleaser.com
+no-leaks: 1 check(s) failed — DO NOT PUBLISH
+```
+
+That is goreleaser's own commit-author default, in generated output.
+
+#### Why it mattered
+
+Not because the finding was dangerous — `dist/` is gitignored and cannot
+be published — but
+because the gate's result depended on leftover build state. CI runs on a
+fresh checkout and
+stayed green; anyone who had built went red. A check that red-greens on
+whether you happened to
+build last is one people learn to ignore, which is the exact failure
+mode this script exists to
+prevent.
+
+#### Fix
+
+`git ls-files --cached --others --exclude-standard` — tracked files,
+plus untracked files that
+are not ignored. That preserves the property that actually matters (a
+file one `git add` from
+landing is still scanned, so a leak is caught **before** it becomes
+history) while excluding
+build output by construction instead of by a growing list of
+`--exclude-dir` flags.
+
+NUL-separated throughout; `xargs -r` so empty input cannot leave grep
+reading stdin, and `--`
+so a leading-dash path is not parsed as an option.
+
+#### Controls, all four
+
+| case | result |
+|---|---|
+| leak in a tracked file | caught |
+| leak in an untracked, unignored file | caught before it lands |
+| populated gitignored `dist/` | ignored, gate green |
+| leak appended to this script itself | caught — self-scan intact |
+
+That last one is load-bearing: this script was itself the leak once, so
+it must never stop
+scanning itself.
+
+- [x] shellcheck clean, `make check` ok
+
+
 ## [0.1.0] - 2026-08-22
 
 
