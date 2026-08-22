@@ -72,6 +72,29 @@ homebrew_casks:
 
       Install uv for the second-extractor cross-check in `schriftsatz verify`.
 
+    # Without this, `brew install` produces a binary macOS kills on sight.
+    #
+    # The darwin binaries are cross-compiled on a Linux runner. Go's linker
+    # ad-hoc signs them, and that signature is valid — `codesign -v` returns 0.
+    # What fails is Gatekeeper: Homebrew tags cask downloads with
+    # com.apple.quarantine, and an ad-hoc-signed, non-notarized binary is
+    # rejected. The process dies with SIGKILL (exit 137) before main() runs, so
+    # it cannot report anything. Verified byte-identical: quarantined -> 137,
+    # `xattr -c` -> runs.
+    #
+    # Be clear about what this costs. Removing the attribute removes
+    # Gatekeeper's check that the binary comes from an identified developer.
+    # The correct fix is a Developer ID signature plus notarization, which
+    # needs a paid Apple Developer account; until then this hook is what makes
+    # the cask work at all, and users are trusting this tap directly.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr",
+                           args: ["-dr", "com.apple.quarantine", "#{staged_path}/schriftsatz"]
+          end
+
 release:
   draft: false
   prerelease: auto
