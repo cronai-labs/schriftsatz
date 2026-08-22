@@ -61,17 +61,25 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Extract the release notes from CHANGELOG.md
-        # The same section the version gate above checks becomes the published
-        # body, so the release notes and the changelog cannot disagree.
+      - name: Generate the release notes from the commit history
+        # git-cliff, not an awk over a hand-written file: the history is the
+        # single source. Squash-merging puts each pull request's description into
+        # the commit body, and cliff.toml renders bodies, so the notes carry the
+        # full prose rather than a list of subjects.
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5  # v4.8.0
+        id: cliff
+        with:
+          config: cliff.toml
+          args: --tag ${{ github.ref_name }} --unreleased --strip header
+        env:
+          OUTPUT: /tmp/release-notes.md
+
+      - name: The notes must not be empty
         run: |
-          awk -v v="$version" '
-            $0 ~ "^## \\[" v "\\]" { f=1; next }
-            f && /^## \[/            { exit }
-            f                          { print }
-          ' CHANGELOG.md > /tmp/release-notes.md
+          # A generator that silently produces nothing is how a release ships an
+          # empty body. Fail here rather than publish one.
           if [ ! -s /tmp/release-notes.md ]; then
-            echo "::error::no release notes extracted for $version"
+            echo "::error::git-cliff produced no release notes for $version"
             exit 1
           fi
           echo "--- notes ---"; cat /tmp/release-notes.md
