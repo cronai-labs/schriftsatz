@@ -1,0 +1,14 @@
+# Prose here runs past 80 characters deliberately — it is written to be read,
+# not to fit a column.
+MD013: false
+# Table column alignment is cosmetic, and most of the tables in this repository
+# are hand-aligned around content of very different widths.
+MD060: false
+# Every release section in a changelog has its own "Fixed"/"Added".
+MD024:
+  siblings_only: true
+# The generated changelog emits bare release-comparison URLs.
+MD034: false
+# A pull request template opens with the first section heading, not a title —
+# GitHub renders the template into a body that never has one.
+MD041: false

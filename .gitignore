@@ -31,3 +31,11 @@ package-lock.json
 
 # goreleaser output
 dist/
+
+# MegaLinter writes its reports here
+megalinter-reports/
+
+# Core dumps. The amd64 MegaLinter image segfaults under emulation on Apple
+# Silicon and drops one of these in the repository root.
+core
+core.*

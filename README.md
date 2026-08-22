@@ -96,7 +96,7 @@ extraction, and table columns have to be sized by what is in them.
 The suite asserts the failing cases as well as the passing ones. A test that only checks
 that the fix works cannot tell you whether it is still testing anything:
 
-```
+```text
 ok   unfixed drops the minus (control)              absent −123,45
 ok   -case does NOT fix it (control)                absent −123,45
 ok   -calt fixes it                                 present −123,45

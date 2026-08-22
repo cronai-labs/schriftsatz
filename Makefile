@@ -49,39 +49,38 @@ test-fast: ## Run only the assertions that need pandoc (no TeX, seconds)
 
 SHELL_FILES := tests/run.sh tests/calt-mwe/run.sh tests/no-leaks.sh .githooks/pre-commit
 
-lint: ## shellcheck every script
-	@# One shell: a bare `exit 0` in a guard only ends ITS line, so a second
-	@# recipe line would run shellcheck anyway and fail with 127.
-	@# LC_ALL is load-bearing: shellcheck writes findings through the locale
-	@# encoding, and under a non-UTF-8 locale an em-dash in a message aborts its
-	@# output mid-stream with "commitBuffer: invalid argument", after which it
-	@# reports spurious parse errors in later files.
-	@if command -v shellcheck >/dev/null; then \
-	  LC_ALL=C.UTF-8 shellcheck $(SHELL_FILES) && echo "shellcheck clean"; \
-	else \
-	  echo "shellcheck not installed — skipped locally, enforced in CI"; \
+# The same image, pinned to the same digest, that the megalinter job in CI runs.
+# One version everywhere is the entire point: this replaced a hand-rolled lint
+# that called whatever shellcheck, gofmt and actionlint happened to be
+# installed, and local 0.11.0 vs CI 0.9.0 disagreed twice over.
+MEGALINTER_IMAGE := ghcr.io/oxsecurity/megalinter-go:v10.0.0
+
+lint: ## Run MegaLinter — the same container, same version, as CI
+	@# On Apple Silicon this image runs under emulation: it is published for
+	@# linux/amd64 only, and there the Go and shellcheck-based linters fail in
+	@# ways that are artefacts of QEMU rather than findings (golangci-lint
+	@# reports "no go files to analyze" because `go list` segfaults). Markdown,
+	@# spelling, YAML and editorconfig are reliable. Trust the CI run for the
+	@# rest; MegaLinter's own documentation says the same.
+	@if ! command -v docker >/dev/null; then \
+	  echo "docker not available — lint is enforced in CI"; exit 0; \
 	fi
-	@go vet ./... && echo "go vet clean"
-	@# gofmt was enforced nowhere, and cmd/schriftsatz/main.go had been sitting
-	@# unformatted on main as a result. go vet does not check formatting.
-	@unformatted=$$(gofmt -l cmd internal); \
-	 if [ -n "$$unformatted" ]; then \
-	   echo "gofmt would change:"; echo "$$unformatted" | sed 's/^/  /'; exit 1; \
-	 else echo "gofmt clean"; fi
+	@arch=$$(uname -m); \
+	if [ "$$arch" = "arm64" ] || [ "$$arch" = "aarch64" ]; then \
+	  echo "note: $(MEGALINTER_IMAGE) is amd64-only; under emulation the Go and"; \
+	  echo "      shell linters produce artefacts, not findings. CI is authoritative."; \
+	fi
+	@docker run --rm -v "$$PWD":/tmp/lint:rw \
+	  -e DEFAULT_WORKSPACE=/tmp/lint -e VALIDATE_ALL_CODEBASE=true \
+	  $(MEGALINTER_IMAGE)
+	@# Lua is not in any MegaLinter flavor: LUA_LUACHECK exists as a descriptor
+	@# but ships in none of them, and pulling the full image to lint two files
+	@# is a poor trade. luacheck runs here instead, and lua-check is installed
+	@# in the pdf job so it is enforced rather than merely available.
 	@if command -v luacheck >/dev/null; then \
 	  luacheck filters/ && echo "luacheck clean"; \
 	else \
 	  echo "luacheck not installed — skipped locally, enforced in CI"; \
-	fi
-	@# A YAML parser accepts workflows that GitHub rejects: a bare SHA with no
-	@# owner/repo, or double quotes inside a ${{ }} expression, both parse as
-	@# valid YAML and then fail at run time with no jobs and no error surfaced.
-	@if command -v actionlint >/dev/null; then \
-	  actionlint && echo "actionlint clean"; \
-	elif command -v docker >/dev/null; then \
-	  docker run --rm -v "$$PWD":/repo -w /repo rhysd/actionlint:latest && echo "actionlint clean (container)"; \
-	else \
-	  echo "actionlint not available — skipped locally, enforced in CI"; \
 	fi
 
 fmt: ## Report formatting problems (trailing whitespace, tabs, missing final newline)

@@ -1,0 +1,18 @@
+extends: default
+rules:
+  # GitHub Actions expressions are written `${{ x }}` — with the spaces. The
+  # braces rule calls every one of them an error, which would be 14 findings
+  # that cannot be fixed without breaking the workflows.
+  braces:
+    forbid: false
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  # The workflows and configs here are commented heavily; an 80-column limit
+  # would turn explanation into noise.
+  line-length: disable
+  # `on:` in a workflow is a key, not the boolean true.
+  truthy:
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
+  document-start: disable
