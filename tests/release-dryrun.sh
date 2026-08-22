@@ -75,6 +75,16 @@ git clone --quiet "$REPO" "$WORK/src"
 git -C "$WORK/src" remote set-url origin \
   "$(git -C "$REPO" remote get-url origin 2>/dev/null || echo https://github.com/cronai-labs/schriftsatz.git)"
 
+# An annotated tag needs a committer identity, and a CI runner has none — this
+# passed locally purely because a developer machine has one configured globally.
+# Set it on the throwaway clone so no machine state is touched. Annotated rather
+# than lightweight because that is what a real release pushes.
+git -C "$WORK/src" config user.name  "release-dryrun"
+git -C "$WORK/src" config user.email "dryrun@localhost"
+# actions/checkout leaves a detached HEAD, which is fine here — that commit is
+# exactly what we mean to rehearse — but the advice block is pure noise.
+git -C "$WORK/src" config advice.detachedHead false
+
 git -C "$WORK/src" tag -d "$TAG" >/dev/null 2>&1 || true
 git -C "$WORK/src" tag -a "$TAG" -m "$TAG"
 
