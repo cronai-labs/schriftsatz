@@ -221,6 +221,26 @@ jobs:
                    echo "--- cask ---"; cat "$cask"; exit 1; }
           done
           echo "cask strips the quarantine attribute"
+      - name: The archives must carry the documentation
+        run: |
+          # goreleaser treats an unmatched `files` glob as a WARNING, so a
+          # pattern that matches nothing ships quietly. v0.1.0 went out with
+          # docs/**/* matching zero files and no documentation in any tarball.
+          tarball=$(ls dist/*_darwin_arm64.tar.gz)
+          listing=$(tar tzf "$tarball")
+          printf '%s\n' "$listing" | sed 's/^/  /'
+          for f in README.md LICENSE CHANGELOG.md; do
+            printf '%s\n' "$listing" | grep -qx "$f" \
+              || { echo "::error::$tarball is missing $f"; exit 1; }
+          done
+          # Every doc in the repo must be in the archive: asserting a fixed
+          # count would pass while a newly added doc silently went missing.
+          missing=0
+          for f in $(git ls-files 'docs/*'); do
+            printf '%s\n' "$listing" | grep -qx "$f" || { echo "::error::$tarball is missing $f"; missing=1; }
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "archive carries every tracked doc"
 
   ci-required:
     # The one required check. Everything above feeds it, so the ruleset names a
