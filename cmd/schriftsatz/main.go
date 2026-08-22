@@ -40,9 +40,11 @@ USAGE
 
 OPTIONS
   -o, --output FILE    Output path (default: <input>.pdf, next to the input)
-      --style FILE     LaTeX header to include (repeatable).
+      --style STYLE    LaTeX header to include (repeatable). Either a path to
+                       your own file, or an embedded style under the name
+                       --list-assets prints, e.g. styles/formal.tex
                        Default: the embedded text-layer and line-breaking styles
-      --no-default-style  Use only the --style files you pass
+      --no-default-style  Drop the defaults; use only the --style files you pass
       --lang CODE      Document language, e.g. de-DE, en-GB (default: en-GB)
       --capacity N     Characters per table line for the width filter
                        (default 80; lower for narrower type areas)
@@ -265,21 +267,43 @@ func build(in, out, lang, capacity string, styles []string, noDefault, keepTex b
 		}
 	}
 
-	if len(styles) == 0 && !noDefault {
+	// The defaults are ADDED TO by --style, not replaced by it, and they come
+	// first so a caller's own header can override them.
+	//
+	// They used to be dropped the moment any --style was given. That made
+	// --no-default-style redundant — its help text already promised "use only
+	// the --style files you pass" — and it meant `--style styles/formal.tex`
+	// built without text-layer.tex, so the documented way to add a footer
+	// silently reintroduced the calt defect this project exists to prevent.
+	//
+	// Resolved straight from paths rather than through resolveStyle: a working
+	// directory that happens to contain a styles/ tree must not change what the
+	// default set means.
+	if !noDefault {
+		var defaults []string
 		if env := os.Getenv("SCHRIFTSATZ_STYLE"); env != "" {
-			styles = []string{env}
+			defaults = []string{env}
 		} else {
 			for _, s := range assets.DefaultStyles {
-				styles = append(styles, paths[s])
+				defaults = append(defaults, paths[s])
 			}
 		}
+		styles = append(defaults, styles...)
 	}
+	resolved := make([]string, 0, len(styles))
 	for _, s := range styles {
-		if _, err := os.Stat(s); err != nil {
-			fmt.Fprintf(os.Stderr, "schriftsatz: style file not found: %s\n", s)
+		p, ok := resolveStyle(s, paths)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "schriftsatz: style not found: %s\n", s)
+			fmt.Fprintln(os.Stderr, "  no file at that path, and not an embedded style. Embedded:")
+			for _, n := range assets.Styles() {
+				fmt.Fprintf(os.Stderr, "    %s\n", n)
+			}
 			return exitUsage
 		}
+		resolved = append(resolved, p)
 	}
+	styles = resolved
 
 	args := []string{in, "--pdf-engine=xelatex"}
 	for _, f := range assets.Filters {
