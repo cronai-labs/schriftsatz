@@ -31,6 +31,10 @@ widths, and why a PDF that looks correct can have a text layer that is silently 
   veraPDF. A faithful text layer is only half of machine readable — the other half
   is reading order and table structure. → [docs/decisions/tagged-pdf.md](docs/decisions/tagged-pdf.md)
 - **Break opportunities after slashes**, for languages that build long compounds.
+- **House style as data.** `imprint`, `brand.ink`, `letterhead` and the rest are
+  metadata, rendered through pandoc's LaTeX writer — so a firm called `Müller & Co.`
+  and a rate of `19 %` come out right without anyone hand-writing a `tabular`. Put the
+  block in a file, pass `--metadata-file`, and one identity covers every document.
 - **Preamble fragments** you can adopt one at a time, and an imprint component that is
   empty by default.
 

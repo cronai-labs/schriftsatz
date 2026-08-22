@@ -57,6 +57,9 @@ OPTIONS
                        extractable. Needs pandoc >= 3.9
       --pdf-standard S Conformance level, implies --tagged: a-3b | ua-2
                        (validated against veraPDF; others are not offered)
+      --metadata-file F  YAML of shared settings — a house style: imprint,
+                       brand colours, letterhead, fonts. Repeatable. The
+                       document's own front matter still wins over it
       --keep-tex       Also write the intermediate .tex next to the output
       --print-asset N  Write one embedded asset to stdout (see --list-assets)
       --list-assets    List the embedded filters and styles
@@ -90,6 +93,7 @@ func run(argv []string) int {
 		lang               string
 		styles             []string
 		stdName            string
+		userMeta           []string
 		noDefault, keepTex bool
 		tagged             bool
 	)
@@ -162,6 +166,16 @@ func run(argv []string) int {
 				return exitUsage
 			}
 			capacity = v
+		case "--metadata-file":
+			v, ok := next(a)
+			if !ok {
+				return exitUsage
+			}
+			if _, err := os.Stat(v); err != nil {
+				fmt.Fprintf(os.Stderr, "schriftsatz: metadata file not found: %s\n", v)
+				return exitUsage
+			}
+			userMeta = append(userMeta, v)
 		case "--tagged":
 			tagged = true
 		case "--pdf-standard":
@@ -225,7 +239,7 @@ func run(argv []string) int {
 	}
 	return build(buildOptions{
 		in: in, out: out, lang: lang, capacity: capacity,
-		styles: styles, noDefault: noDefault, keepTex: keepTex,
+		styles: styles, noDefault: noDefault, keepTex: keepTex, userMeta: userMeta,
 		tagged: tagged, standard: standard,
 	})
 }
@@ -343,6 +357,7 @@ func checkTaggingSupport() int {
 type buildOptions struct {
 	in, out, lang, capacity string
 	styles                  []string
+	userMeta                []string
 	noDefault, keepTex      bool
 	tagged                  bool
 	standard                *pdfStandard // nil means tagging without a conformance level
@@ -415,36 +430,16 @@ func build(opt buildOptions) int {
 	}
 	styles = resolved
 
-	// Recover the document's own header-includes, and give it the last word.
-	//
-	// --include-in-header REPLACES that template variable rather than appending
-	// to it, and the default styles mean -H is always passed — so a document's
-	// own header-includes silently never reached the preamble. The build
-	// succeeded, the package went unloaded, and a command the document defined
-	// was undefined where the body used it, which reads as an error in the
-	// document rather than in the tool.
-	//
-	// Only when something is actually being passed with -H. With none, the
-	// variable is intact and adding the file too would render it twice.
-	if len(styles) > 0 {
-		p, err := documentHeaderIncludes(in, tmp, paths[assets.TemplateHeaderIncludes])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "schriftsatz: %v\n", err)
-			return exitBuild
-		}
-		if p != "" {
-			// Last, so the document overrides the tool's styles rather than the
-			// other way round — the same precedence as documentDefaults.
-			styles = append(styles, p)
-		}
-	}
-
 	defaults := filepath.Join(tmp, "defaults.yaml")
 	if err := os.WriteFile(defaults, []byte(documentDefaults), 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "schriftsatz: %v\n", err)
 		return exitBuild
 	}
 	metaFiles := []string{defaults}
+	// The caller's house style sits between the tool's defaults and the
+	// flag-driven tagging block: it overrides the defaults, the document
+	// overrides it, and an explicit flag overrides everything.
+	metaFiles = append(metaFiles, opt.userMeta...)
 
 	if opt.tagged {
 		// A second metadata file rather than a line in the defaults: this one is
@@ -456,6 +451,47 @@ func build(opt buildOptions) int {
 			return exitBuild
 		}
 		metaFiles = append(metaFiles, p)
+	}
+
+	// Recover the document's own preamble contributions, and give them the last
+	// word.
+	//
+	// --include-in-header REPLACES the header-includes variable rather than
+	// appending to it, and the default styles mean -H is always passed — so a
+	// document's own header-includes silently never reached the preamble. The
+	// same pass renders the house style (imprint, brand colours, letterhead)
+	// through pandoc's LaTeX writer, which is what escapes % & _ # so that no
+	// caller has to hand-write a tabular.
+	//
+	// Only when something is actually being passed with -H. With none, the
+	// variable is intact and adding the file too would render it twice.
+	if len(styles) > 0 {
+		pre, needsFormal, err := documentPreamble(in, tmp, paths[assets.TemplateHeaderIncludes], metaFiles)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "schriftsatz: %v\n", err)
+			return exitBuild
+		}
+		if pre != "" {
+			// formal.tex first, or \\renewcommand{\\docimprint} has nothing to
+			// renew. A document that declares an imprint is opting in to the
+			// page furniture that shows it; without this the metadata is
+			// accepted and silently does nothing.
+			if needsFormal {
+				formal := paths[assets.StyleFormal]
+				already := false
+				for _, st := range styles {
+					if st == formal {
+						already = true
+					}
+				}
+				if !already {
+					styles = append(styles, formal)
+				}
+			}
+			// Last, so the document overrides the tool's styles rather than the
+			// other way round — the same precedence as documentDefaults.
+			styles = append(styles, pre)
+		}
 	}
 
 	var filters []string
@@ -569,28 +605,38 @@ func pandocArgs(in string, metaFiles []string, lang, capacity string, filters, s
 	return args
 }
 
-// documentHeaderIncludes renders the document's own header-includes to a file
-// and returns its path, or "" if the document declares none.
+// documentPreamble renders the document's own preamble contributions to a file
+// and returns its path, whether styles/formal.tex is needed to make sense of
+// them, and any error. The path is "" when the document contributes nothing.
 //
 // A second pandoc pass, deliberately with no -H, using a template that renders
-// that variable and nothing else. It costs no TeX run. The LaTeX writer does
-// the escaping, so nothing here has to quote anything by hand.
+// those variables and nothing else. It costs no TeX run. The LaTeX writer does
+// the escaping, which is the whole reason the house style is metadata rather
+// than raw LaTeX in the Markdown: an unescaped % there comments out the rest of
+// the line, and & and _ fail obscurely.
 //
-// A caution for anyone testing this by hand: pandoc's latex_macros extension
-// expands \newcommand definitions itself, so a macro defined in header-includes
-// appears to work even when the preamble never received it. Test with
-// \usepackage or \typeout instead.
-func documentHeaderIncludes(in, tmp, template string) (string, error) {
-	out, err := exec.Command("pandoc", in, "-t", "latex", "--template", template).Output()
+// A caution for anyone testing the header-includes half by hand: pandoc's
+// latex_macros extension expands \newcommand definitions itself, so a macro
+// defined there appears to work even when the preamble never received it. Test
+// with \usepackage or \typeout instead.
+func documentPreamble(in, tmp, template string, metaFiles []string) (path string, needsFormal bool, err error) {
+	args := []string{in, "-t", "latex", "--template", template}
+	for _, m := range metaFiles {
+		args = append(args, "--metadata-file", m)
+	}
+	out, err := exec.Command("pandoc", args...).Output()
 	if err != nil {
-		return "", fmt.Errorf("could not read header-includes from %s: %w", in, err)
+		return "", false, fmt.Errorf("could not read the preamble settings of %s: %w", in, err)
 	}
 	if len(strings.TrimSpace(string(out))) == 0 {
-		return "", nil
+		return "", false, nil
 	}
-	p := filepath.Join(tmp, "document-header-includes.tex")
+	// The template emits this marker beside anything that renews a command
+	// formal.tex declares.
+	needsFormal = strings.Contains(string(out), "schriftsatz-needs-formal")
+	p := filepath.Join(tmp, "document-preamble.tex")
 	if err := os.WriteFile(p, out, 0o600); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return p, nil
+	return p, needsFormal, nil
 }

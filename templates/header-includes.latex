@@ -1,13 +1,46 @@
-$-- Renders ONLY the document's own header-includes, so it can be recovered.
+$-- Renders the document's own preamble contributions, and nothing else.
 $--
-$-- --include-in-header REPLACES the header-includes template variable rather
-$-- than appending to it, and this tool always passes -H for its default
-$-- styles. So a document's own header-includes never reached the preamble:
-$-- the build succeeded, the package was not loaded, and a command the document
-$-- defined was undefined where it was used.
+$-- TWO JOBS, ONE PASS
 $--
-$-- Rendering it here, in a pass that passes no -H, gets the content back. The
-$-- LaTeX writer does the escaping, so nothing has to be quoted by hand.
+$-- 1. header-includes. --include-in-header REPLACES that template variable
+$--    rather than appending to it, and this tool always passes -H for its
+$--    default styles, so a document's own header-includes never reached the
+$--    preamble. Rendering it here, in a pass with no -H, gets it back.
+$--
+$-- 2. House style from metadata. Filling in the imprint used to mean writing a
+$--    tabular by hand inside the Markdown, where an unescaped % comments out
+$--    the rest of the line and & and _ fail obscurely. Rendered here, the
+$--    LaTeX WRITER does the escaping, so a firm called "Müller & Co." and an
+$--    amount with a % in it come out right without anyone quoting anything.
+$--
+$-- Nothing in this file is emitted unless the document asks for it.
 $for(header-includes)$
 $header-includes$
 $endfor$
+$if(brand.ink)$
+\definecolor{doc-ink}{HTML}{$brand.ink$}
+$endif$
+$if(brand.secondary)$
+\definecolor{doc-secondary}{HTML}{$brand.secondary$}
+$endif$
+$if(brand.hairline)$
+\definecolor{doc-hairline}{HTML}{$brand.hairline$}
+$endif$
+$if(imprint)$
+$-- The marker the CLI reads to decide that formal.tex is wanted. A document
+$-- that declares an imprint is opting in to the furniture that renders it;
+$-- without this the metadata is accepted and silently does nothing.
+%% schriftsatz-needs-formal
+\renewcommand{\docimprint}{%
+  \footnotesize\color{doc-secondary}%
+  \begin{tabular}[b]{@{}l@{}}
+$for(imprint)$
+  $imprint$$sep$\\
+$endfor$
+  \end{tabular}}
+$endif$
+$if(letterhead)$
+%% schriftsatz-needs-formal
+\renewcommand{\docletterhead}{%
+  \noindent\includegraphics[height=$if(letterhead-height)$$letterhead-height$$else$9mm$endif$]{$letterhead$}\par\vspace{8mm}}
+$endif$
