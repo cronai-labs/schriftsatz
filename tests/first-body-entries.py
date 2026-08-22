@@ -15,7 +15,7 @@ import sys
 for line in open(sys.argv[1], encoding="utf-8"):
     body = json.loads(line).get("body")
     if body:
-        print(sum(1 for l in body.splitlines() if l.startswith("- ")))
+        print(sum(1 for l in body.splitlines() if l[:2] in ("- ", "* ")))
         break
 else:
     print(0)

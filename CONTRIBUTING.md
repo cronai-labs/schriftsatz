@@ -79,6 +79,22 @@ docs(calt): correct the ToUnicode mechanism
 test(styles): assert the signature block cannot be split
 ```
 
+**Your PR title decides whether there is a release at all.** Only `feat`, `fix`, `perf` and
+`revert` bump the version and appear in the release notes. Everything else — `docs`, `test`,
+`refactor`, `style`, `ci`, `build`, `chore` — lands on `main` without publishing anything.
+
+That is deliberate: before it, a single `docs:` commit took v0.2.0 to v0.2.1 and pushed a
+Homebrew cask for a README typo. But it cuts both ways, so it is worth being blunt about:
+
+> **A genuine bug fix titled `chore:` ships to nobody.** The title is no longer just a changelog
+> label; it is the release decision. If a user would notice the change, it is `fix` or `feat`.
+
+`make next` tells you what the next release will be called — including "no change", which is how
+you check before merging that you titled it the way you meant to.
+
+**Small PRs do not mean noisy releases.** Merging a stack in quick succession produces **one**
+release, not one per PR: the release job releases the tip of `main` and earlier runs defer to it.
+
 **`CHANGELOG.md` is generated and not tracked at all.** It is written at release time from the
 commit history and shipped inside the release archives; the Releases page is the changelog of
 record. `make changelog` writes a local copy if you want one to read.

@@ -21,18 +21,33 @@ the single commit that regenerated it — a commit cannot describe itself. The
 at the moment the tag is pushed, and are complete.
 
 """
+# One line per change: subject, scope, and a short SHA that links to the commit.
+#
+# It used to render {{ commit.body }}. Squash-merging puts the entire pull
+# request description into the commit body, so the v0.2.0 notes came to 14,014
+# bytes across 27 entries — mostly CI changes with multi-paragraph rationale.
+# The same range renders as 1,160 bytes and 6 entries this way.
+#
+# The detail is not lost, it is one click away: the (#NN) that squash-merging
+# appends to the subject is auto-linked by GitHub, and the SHA links to the
+# commit whose body carries the full reasoning.
+#
+# The repository URL is a literal rather than {{ remote.link }}. Configuring
+# [remote.github] makes git-cliff call the GitHub API for metadata, which needs
+# network, a token and a writable cache — it panics in the release container
+# without them. A release must not depend on an API call it does not need.
 body = """
-{% if version %}## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
-{% else %}## [Unreleased]
-{% endif %}
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}](https://github.com/cronai-labs/schriftsatz/compare/{{ previous.version }}...{{ version }}) ({{ timestamp | date(format="%Y-%m-%d") }})
+{% else %}\
+## [Unreleased]
+{% endif %}\
 {% for group, commits in commits | group_by(attribute="group") %}
-### {{ group | upper_first }}
-{% for commit in commits %}
-- **{{ commit.message | upper_first }}**
-{% if commit.body %}
-{{ commit.body | trim }}
-{% endif %}
-{% endfor %}
+### {{ group | striptags | trim }}
+
+{% for commit in commits %}\
+* {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/cronai-labs/schriftsatz/commit/{{ commit.id }}))
+{% endfor %}\
 {% endfor %}
 """
 trim = true
@@ -66,18 +81,34 @@ commit_preprocessors = [
   { pattern = '(?m)^#{1,5} ', replace = "#### " },
 ]
 
+# Only user-visible change bumps the version and appears in the notes.
+#
+# This is load-bearing in a repository where merging publishes: every type that
+# appears here as a group also CUTS A RELEASE. Measured before this changed, a
+# single `docs:` commit took v0.2.0 to v0.2.1 and pushed a Homebrew cask for a
+# README typo.
+#
+# skip = true is the only lever that works. no_increment_regex is documented
+# upstream but had no effect in git-cliff 2.13.1, tested three ways.
+#
+# The trade-off is real and belongs in CONTRIBUTING rather than being
+# discovered: a PR title is now the decision about whether users get a release
+# at all, so a genuine fix labelled `chore:` ships to nobody.
 commit_parsers = [
-  { message = "^feat", group = "Added" },
-  { message = "^fix", group = "Fixed" },
-  { message = "^docs", group = "Documentation" },
-  { message = "^perf", group = "Changed" },
-  { message = "^refactor", group = "Changed" },
-  { message = "^test", group = "Testing" },
-  { message = "^chore\\(release\\)", skip = true },
-  # Dependabot is real work but not what a reader of release notes wants.
+  # <!-- n --> only orders the sections, since group_by sorts alphabetically;
+  # the template strips it with `striptags`.
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+  { message = "^perf", group = "<!-- 2 -->Performance" },
+  { message = "^revert", group = "<!-- 3 -->Reverts" },
+  # Real work, and none of it is why someone reads release notes.
+  { message = "^docs", skip = true },
+  { message = "^test", skip = true },
+  { message = "^refactor", skip = true },
+  { message = "^style", skip = true },
   { message = "^ci", skip = true },
-  { message = "^build\\(deps", skip = true },
-  { message = "^chore", group = "Miscellaneous" },
+  { message = "^build", skip = true },
+  { message = "^chore", skip = true },
 ]
 tag_pattern = "v[0-9]*"
 
