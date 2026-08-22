@@ -16,6 +16,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -43,6 +44,7 @@ var (
 
 type server struct {
 	out       string
+	scenario  string
 	baseURL   string
 	assets    atomic.Int64
 	unhandled atomic.Int64
@@ -51,6 +53,7 @@ type server struct {
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8099", "listen address")
 	out := flag.String("out", "", "directory to record requests into")
+	scenario := flag.String("scenario", "fresh", `"fresh" (404 on the tag: create path) or "existing-release" (200: update path)`)
 	flag.Parse()
 	if *out == "" {
 		log.Fatal("mockgh: -out is required")
@@ -59,7 +62,7 @@ func main() {
 		log.Fatalf("mockgh: %v", err)
 	}
 
-	s := &server{out: *out, baseURL: "http://" + *addr}
+	s := &server{out: *out, scenario: *scenario, baseURL: "http://" + *addr}
 	ln, err := listen(*addr)
 	if err != nil {
 		log.Fatalf("mockgh: %v", err)
@@ -83,10 +86,24 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 		})
 
-	// A release for this tag must NOT already exist, or goreleaser takes the
-	// update path and release.mode decides whether the body is written at all.
-	// 404 forces the create path, which is what a real first publish does.
+	// Two scenarios, chosen with -scenario.
+	//
+	// "fresh" (the default) answers 404, which forces the CREATE path — what a
+	// first publish does.
+	//
+	// "existing-release" answers 200 with a deliberately WRONG body, which
+	// forces the UPDATE path — what a RESUMED run meets after its own earlier
+	// attempt already published this tag. Tags here are immutable, so that
+	// re-run is the only recovery there is, and release.mode is what decides
+	// whether it repairs the body or preserves the broken one. Untested, that
+	// setting is the shape of bug #23.
 	case reReleaseByTag.MatchString(r.URL.Path):
+		if s.scenario == "existing-release" {
+			rel := s.release(1)
+			rel["body"] = "stale body from the attempt that failed\n"
+			s.json(w, 200, rel)
+			return
+		}
 		s.json(w, 404, map[string]any{"message": "Not Found"})
 
 	case r.Method == http.MethodPost && reReleases.MatchString(r.URL.Path):
@@ -95,7 +112,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.json(w, 201, s.release(1))
 
 	case r.Method == http.MethodPatch && reReleaseByID.MatchString(r.URL.Path):
+		// A resumed run sends TWO patches: the update that carries the body,
+		// then the publish that only flips draft. Recording both to one file
+		// truncated the first with the second and made the body look empty, so
+		// keep an ordered log as well as the last one.
 		s.record("release-update.json", body, false)
+		s.record("release-updates.jsonl", append(compact(body), '\n'), true)
 		s.json(w, 200, s.release(1))
 
 	case reAssets.MatchString(r.URL.Path):
@@ -133,6 +155,15 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("mockgh: UNHANDLED %s %s", r.Method, r.URL.Path)
 		s.json(w, 200, map[string]any{})
 	}
+}
+
+// compact renders JSON on a single line so one request is one line of the log.
+func compact(body []byte) []byte {
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, body); err != nil {
+		return bytes.TrimSpace(body)
+	}
+	return buf.Bytes()
 }
 
 func (s *server) release(id int64) map[string]any {

@@ -141,7 +141,16 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
         | sort -u || true)
   n=$(printf '%s\n' "$ids" | grep -c . || true)
   [ "$n" -gt 1 ] && flag "history carries more than one identity ($n)" "$ids"
-  hist=$(git log --format='%s%n%b' 2>/dev/null | grep -inE 'draf[t]|not yet file[d]|scratc[h]|T[O]DO' || true)
+  # SUBJECTS only, not bodies. This catches a commit describing its own work as
+  # unfinished. Bodies now legitimately discuss draft releases at length —
+  # goreleaser creates the GitHub release as a draft and un-drafts it to cut the
+  # tag — and the first attempt at this excluded phrases like "as a draft" one
+  # by one, which is a rule that fails open the moment someone phrases it
+  # differently. A subject is where a commit describes itself.
+  # Markers inside files are covered by the separate rule above.
+  # WI[P] is bracketed for the same reason as T[O]DO: this file scans itself.
+  hist=$(git log --format='%s' 2>/dev/null \
+         | grep -inE 'draf[t]|not yet file[d]|scratc[h]|T[O]DO|\bWI[P]\b' || true)
   [ -n "$hist" ] && flag "commit message describing unfinished work" "$hist"
 fi
 

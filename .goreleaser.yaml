@@ -113,4 +113,23 @@ homebrew_casks:
 release:
   draft: false
   prerelease: auto
-  mode: keep-existing
+  # `replace`, not `keep-existing`. The release workflow is re-runnable by
+  # design: a tag here can never be moved or deleted, so re-running against the
+  # same tag is the only recovery there is. With keep-existing a first run that
+  # published a wrong body could never be repaired by a second. The notes are
+  # deterministic -- git-cliff over a fixed commit range -- so replacing them is
+  # idempotent rather than destructive.
+  mode: replace
+  # No tag is pushed by anything. goreleaser always creates the GitHub release
+  # as a draft, uploads the artifacts, then un-drafts it (internal/client/
+  # github.go: "Always start with a draft release while uploading artifacts.
+  # PublishRelease will undraft it."). GitHub creates the tag from this field.
+  #
+  # This is a CORRECTNESS dependency, not a nicety: the API default for
+  # target_commitish is "the repository's default branch", so without it a tag
+  # cut while main had moved on would land on the wrong commit -- and ruleset
+  # release-tag-immutability has no bypass actor, so that could never be undone.
+  target_commitish: '{{ .FullCommit }}'
+  # A re-run after a partial upload otherwise dies on a 422 for every asset that
+  # already exists, which would leave no recovery path at all.
+  replace_existing_artifacts: true
