@@ -46,9 +46,19 @@ snapshot:
   version_template: '{{ incpatch .Version }}-next'
 
 changelog:
-  # The changelog is hand-maintained and gates the release; generating a second
-  # one from commit subjects would produce two sources of truth that disagree.
-  disable: true
+  # Deliberately NOT `disable: true`. That setting looks harmless next to
+  # --release-notes and silently breaks it: goreleaser loads the --release-notes
+  # file inside this pipe's Run, and `disable` makes the pipe Skip, so the file
+  # is never read and the release body renders empty. v0.1.1 shipped that way.
+  #
+  #   func (Pipe) Skip(ctx) { return ctx.Config.Changelog.Disable }
+  #   func (Pipe) Run(ctx)  { ctx.ReleaseNotes = loadContent(ctx.ReleaseNotesFile) ... }
+  #
+  # With the pipe enabled it loads our notes, sets ReleaseNotes, and returns
+  # before generating anything itself — so there is still exactly one changelog,
+  # the git-cliff-generated CHANGELOG.md. goreleaser's own help says the flag
+  # "will skip GoReleaser changelog generation", which is what we want.
+  disable: false
 
 # A Cask, not a Formula. goreleaser deprecated `brews` in v2.10 and hard-
 # deprecated it in v2.16: formulae that install pre-compiled binaries were a

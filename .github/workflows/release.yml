@@ -107,3 +107,22 @@ jobs:
           # cannot push to another repository, and widening it would give every
           # workflow in this repo write access to the tap.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: The PUBLISHED release must actually carry the notes
+        # Verify the outcome, not the input. The previous guard checked the
+        # notes FILE — goreleaser's input — and passed while goreleaser went on
+        # to publish an empty body, so two releases in a row shipped empty past
+        # a check meant to prevent exactly that. Read back what GitHub now
+        # serves; nothing downstream can fool this.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          body=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          entries=$(printf '%s\n' "$body" | grep -c '^- ' || true)
+          printf 'published body: %s bytes, %s entries\n' "$(printf '%s' "$body" | wc -c | tr -d ' ')" "${entries:-0}"
+          if [ "${entries:-0}" -lt 1 ]; then
+            echo "::error::the published release body carries no entries"
+            printf -- '--- what was published ---\n%s\n' "$body"
+            exit 1
+          fi
