@@ -40,7 +40,7 @@ test: ## Run the full suite
 test-fast: ## Run only the assertions that need pandoc (no TeX, seconds)
 	@./tests/run.sh --no-pdf
 
-SHELL_FILES := scripts/release.sh tests/run.sh tests/calt-mwe/run.sh tests/no-leaks.sh .githooks/pre-commit
+SHELL_FILES := tests/run.sh tests/calt-mwe/run.sh tests/no-leaks.sh .githooks/pre-commit
 
 lint: ## shellcheck every script
 	@# One shell: a bare `exit 0` in a guard only ends ITS line, so a second
