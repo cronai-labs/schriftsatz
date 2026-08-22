@@ -80,3 +80,14 @@ commit_parsers = [
   { message = "^chore", group = "Miscellaneous" },
 ]
 tag_pattern = "v[0-9]*"
+
+[bump]
+# Pre-1.0, a breaking change is a MINOR bump. git-cliff defaults to
+# breaking_always_bump_major = true, which would turn the first `feat!:` pull
+# request title into a permanent 1.0.0 — and once #30 lands that happens the
+# moment the title is merged, with no second look, on a tag that can never be
+# moved. Verified against this config: with this line 0.1.1 + `feat(cli)!:`
+# gives 0.2.0; without it, 1.0.0. Delete it when 1.0.0 is a decision rather
+# than an accident.
+breaking_always_bump_major = false
+features_always_bump_minor = true
