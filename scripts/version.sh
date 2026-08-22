@@ -50,7 +50,26 @@ dirty=''
 
 if [ -n "$base" ]; then
   n=$(git rev-list --count "$base..HEAD" 2>/dev/null || echo 0)
-  printf '%s-dev.%s+%s%s\n' "${base#v}" "$n" "$sha" "$dirty"
+  # Based on the NEXT patch version, not the last tag.
+  #
+  # SemVer 2.0 §11: a pre-release sorts BELOW its normal version. Basing on the
+  # last tag produced 0.2.1-dev.3 for work done AFTER v0.2.1 — which sorts below
+  # v0.2.1, so every development build claimed to predate the release it
+  # follows, and anything comparing versions got it backwards.
+  #
+  #   0.2.1  <  0.2.2-dev.3+abc1234  <  0.2.2
+  #
+  # A patch bump rather than asking git-cliff for the real next version: it
+  # needs no tools, is identical on every machine, and sorts correctly either
+  # way — 0.2.2-dev.N is below 0.2.2 and below 0.3.0. A dev version's job is to
+  # order and identify, not to predict the next release number.
+  stripped=${base#v}
+  major=${stripped%%.*}
+  rest=${stripped#*.}
+  minor=${rest%%.*}
+  patch=${stripped##*.}
+  printf '%s.%s.%s-dev.%s+%s%s\n' "$major" "$minor" "$((patch + 1))" "$n" "$sha" "$dirty"
 else
-  printf '0.0.0-dev+%s%s\n' "$sha" "$dirty"
+  # No tags at all: 0.0.1-dev sorts below a future 0.0.1 and below everything after.
+  printf '0.0.1-dev.0+%s%s\n' "$sha" "$dirty"
 fi

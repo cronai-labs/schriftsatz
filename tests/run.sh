@@ -314,6 +314,28 @@ strays=$(
 if [ -z "$strays" ]; then ok "no second place computes a version"
 else bad "these compute a version of their own: $(printf '%s' "$strays" | tr '\n' ' ')"; fi
 
+# A development version must sort ABOVE the release it follows and BELOW the
+# next one. It did neither: version.sh based it on the LAST tag, so 0.2.1-dev.3
+# — work done after v0.2.1 — sorted below v0.2.1, because SemVer §11 puts a
+# pre-release below its normal version. Nothing caught it because the assertions
+# above compare strings, and a string comparison cannot see an ordering bug.
+last=$(git -C "$ROOT" describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null | sed 's/^v//' || true)
+if [ -n "$last" ]; then
+  # A commit that is not the tag, so version.sh takes the development path.
+  dev=$(cd "$ROOT" && git stash list >/dev/null 2>&1; ./scripts/version.sh)
+  case "$dev" in
+    *-dev.*)
+      nextminor="${last%%.*}.$(( $(printf '%s' "$last" | cut -d. -f2) + 1 )).0"
+      if python3 "$ROOT/tests/semver-order.py" "$last" "$dev" "$nextminor" >/dev/null 2>&1; then
+        ok "a dev version sorts between $last and $nextminor ($dev)"
+      else
+        bad "dev version $dev does not sort between $last and $nextminor"
+      fi ;;
+    *)
+      printf '  skip HEAD is exactly a release, so there is no dev version here\n' ;;
+  esac
+fi
+
 # A --depth 1 clone fetches no tags, and bare `git describe --tags` exits 128
 # there with "No names found" — which $(shell ...) swallows into an empty
 # -X main.version= and a binary reporting nothing. ci.yml checks out shallow in
