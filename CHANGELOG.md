@@ -6,6 +6,11 @@ Generated from the commit history by [git-cliff](https://git-cliff.org) — do n
 edit by hand, the next release overwrites it. Each entry's prose is the
 description of the pull request that introduced the change.
 
+This file is regenerated when a release is prepared, so it lags the history by
+the single commit that regenerated it — a commit cannot describe itself. The
+**GitHub release notes are authoritative**: they are generated from the history
+at the moment the tag is pushed, and are complete.
+
 ## [0.1.0] - 2026-08-22
 
 
@@ -182,6 +187,44 @@ The workflow treats an empty extraction as a hard error, so this cannot
 regress silently.
 
 - [x] actionlint, goreleaser check, `make check` clean
+
+
+- **Generate the changelog from history, one release path (#10)**
+
+The changelog was hand-maintained while `cliff.toml` and
+`scripts/release.sh` sat unused —
+and `release.sh` was referenced nowhere in the release workflow. Two
+paths that disagreed.
+
+The justification for keeping it manual was **wrong**: squash-merging
+puts the PR description
+into the commit body, so the prose is already in the history and
+git-cliff renders bodies.
+
+#### Three bugs had to be fixed for generation to actually work
+
+- A leading `Closes #n` made the conventional-commit parser treat the
+entire body as a footer
+value, so `commit.body` was null — that is why the first attempt
+rendered subjects only.
+- PR `##` headings landed level with the version heading, breaking the
+hierarchy.
+- Reviewer-facing sections (Checklist and friends) became release notes.
+
+Rust's regex crate has no lookahead, so the section strip is written
+without one.
+
+#### Verified
+
+| | |
+|---|---|
+| bodies populated | 4/4 commits, 6.2 KB prose |
+| release notes | 6117 bytes |
+| control (empty range) | 0 bytes |
+| `grep -qP`, `bash 3.2`, Homebrew, golden comparison | all retained |
+| heading depth | `## [0.1.0]` → `### Added` → `#### Why` |
+
+- [x] `make check`, actionlint clean
 
 
 

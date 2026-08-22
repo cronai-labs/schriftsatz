@@ -15,6 +15,11 @@ Generated from the commit history by [git-cliff](https://git-cliff.org) — do n
 edit by hand, the next release overwrites it. Each entry's prose is the
 description of the pull request that introduced the change.
 
+This file is regenerated when a release is prepared, so it lags the history by
+the single commit that regenerated it — a commit cannot describe itself. The
+**GitHub release notes are authoritative**: they are generated from the history
+at the moment the tag is pushed, and are complete.
+
 """
 body = """
 {% if version %}## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
