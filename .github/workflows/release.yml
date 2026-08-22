@@ -70,18 +70,26 @@ jobs:
         id: cliff
         with:
           config: cliff.toml
-          args: --tag ${{ github.ref_name }} --unreleased --strip header
+          # --current, not --unreleased. This workflow is triggered BY a tag
+          # push, so by the time it runs the tag exists and nothing is
+          # "unreleased" — that flag yields the version heading and no entries.
+          # --current selects the release containing the tagged commit.
+          args: --current --strip header
         env:
           OUTPUT: /tmp/release-notes.md
 
-      - name: The notes must not be empty
+      - name: The notes must contain entries
         run: |
-          # A generator that silently produces nothing is how a release ships an
-          # empty body. Fail here rather than publish one.
-          if [ ! -s /tmp/release-notes.md ]; then
-            echo "::error::git-cliff produced no release notes for $version"
+          # Count ENTRIES, not bytes. v0.1.0 shipped an empty body past a `-s`
+          # check because git-cliff emitted a version heading and nothing else:
+          # 23 bytes, zero entries, and -s is true for any non-empty file.
+          entries=$(grep -c '^- ' /tmp/release-notes.md || true)
+          if [ "${entries:-0}" -lt 1 ]; then
+            echo "::error::git-cliff produced no entries for $version"
+            echo "--- what it produced ---"; cat /tmp/release-notes.md
             exit 1
           fi
+          echo "$entries entries"
           echo "--- notes ---"; cat /tmp/release-notes.md
 
       - name: Publish with goreleaser
