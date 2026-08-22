@@ -1,0 +1,13 @@
+$-- Renders ONLY the document's own header-includes, so it can be recovered.
+$--
+$-- --include-in-header REPLACES the header-includes template variable rather
+$-- than appending to it, and this tool always passes -H for its default
+$-- styles. So a document's own header-includes never reached the preamble:
+$-- the build succeeded, the package was not loaded, and a command the document
+$-- defined was undefined where it was used.
+$--
+$-- Rendering it here, in a pass that passes no -H, gets the content back. The
+$-- LaTeX writer does the escaping, so nothing has to be quoted by hand.
+$for(header-includes)$
+$header-includes$
+$endfor$

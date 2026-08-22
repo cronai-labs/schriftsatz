@@ -17,7 +17,7 @@ import (
 	"strings"
 )
 
-//go:embed filters/*.lua styles/*.tex
+//go:embed filters/*.lua styles/*.tex templates/*.latex
 var files embed.FS
 
 // Names of the assets, so callers do not hardcode paths.
@@ -28,6 +28,10 @@ const (
 	StyleTextLayer    = "styles/text-layer.tex"
 	StyleLineBreaking = "styles/linebreaking.tex"
 	StyleFormal       = "styles/formal.tex"
+
+	// TemplateHeaderIncludes renders a document's own header-includes and
+	// nothing else, so the CLI can recover what -H would otherwise replace.
+	TemplateHeaderIncludes = "templates/header-includes.latex"
 )
 
 // DefaultStyles are included unless the caller opts out. formal.tex is not among

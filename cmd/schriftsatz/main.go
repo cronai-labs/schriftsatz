@@ -415,6 +415,30 @@ func build(opt buildOptions) int {
 	}
 	styles = resolved
 
+	// Recover the document's own header-includes, and give it the last word.
+	//
+	// --include-in-header REPLACES that template variable rather than appending
+	// to it, and the default styles mean -H is always passed — so a document's
+	// own header-includes silently never reached the preamble. The build
+	// succeeded, the package went unloaded, and a command the document defined
+	// was undefined where the body used it, which reads as an error in the
+	// document rather than in the tool.
+	//
+	// Only when something is actually being passed with -H. With none, the
+	// variable is intact and adding the file too would render it twice.
+	if len(styles) > 0 {
+		p, err := documentHeaderIncludes(in, tmp, paths[assets.TemplateHeaderIncludes])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "schriftsatz: %v\n", err)
+			return exitBuild
+		}
+		if p != "" {
+			// Last, so the document overrides the tool's styles rather than the
+			// other way round — the same precedence as documentDefaults.
+			styles = append(styles, p)
+		}
+	}
+
 	defaults := filepath.Join(tmp, "defaults.yaml")
 	if err := os.WriteFile(defaults, []byte(documentDefaults), 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "schriftsatz: %v\n", err)
@@ -543,4 +567,30 @@ func pandocArgs(in string, metaFiles []string, lang, capacity string, filters, s
 		args = append(args, "-M", "table-capacity="+capacity)
 	}
 	return args
+}
+
+// documentHeaderIncludes renders the document's own header-includes to a file
+// and returns its path, or "" if the document declares none.
+//
+// A second pandoc pass, deliberately with no -H, using a template that renders
+// that variable and nothing else. It costs no TeX run. The LaTeX writer does
+// the escaping, so nothing here has to quote anything by hand.
+//
+// A caution for anyone testing this by hand: pandoc's latex_macros extension
+// expands \newcommand definitions itself, so a macro defined in header-includes
+// appears to work even when the preamble never received it. Test with
+// \usepackage or \typeout instead.
+func documentHeaderIncludes(in, tmp, template string) (string, error) {
+	out, err := exec.Command("pandoc", in, "-t", "latex", "--template", template).Output()
+	if err != nil {
+		return "", fmt.Errorf("could not read header-includes from %s: %w", in, err)
+	}
+	if len(strings.TrimSpace(string(out))) == 0 {
+		return "", nil
+	}
+	p := filepath.Join(tmp, "document-header-includes.tex")
+	if err := os.WriteFile(p, out, 0o600); err != nil {
+		return "", err
+	}
+	return p, nil
 }

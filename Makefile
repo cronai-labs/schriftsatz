@@ -104,6 +104,7 @@ bin: ## Compile the binary only (no TeX needed)
 	@# former and deliberately not the latter.
 	@cp filters/*.lua internal/assets/filters/
 	@cp styles/*.tex  internal/assets/styles/
+	@cp templates/*.latex internal/assets/templates/
 	@mkdir -p build
 	@go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) ./cmd/schriftsatz
 	@echo "  $(BIN) ($(VERSION))"

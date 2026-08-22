@@ -318,6 +318,38 @@ else
   printf '  skip Inter not installed — cannot exercise the text-layer fix\n'
 fi
 
+step "the document's own header-includes reaches the preamble"
+# -H REPLACES that template variable rather than appending to it, and the
+# default styles mean -H is always passed — so a document's own header-includes
+# silently never arrived.
+#
+# Tested with \usepackage, NOT \newcommand. pandoc's latex_macros extension
+# expands macro definitions itself, so a \newcommand in header-includes appears
+# to work even when the preamble never received it — which is how this defect
+# hid from a hand test.
+printf -- '---\ntitle: t\nheader-includes:\n  - |\n    \\usepackage{soul}\n    \\typeout{DOC-PREAMBLE-REACHED}\n---\n\nx\n' > "$t/hi.md"
+if "$SS" "$t/hi.md" --keep-tex -o "$t/hi.pdf" >/dev/null 2>&1 \
+   && grep -q 'usepackage{soul}' "$t/hi.tex" 2>/dev/null; then
+  ok "header-includes from the document is in the preamble"
+else bad "the document's header-includes was discarded"; fi
+# And it must come AFTER the tool's styles, so the document has the last word.
+hi_line=$(grep -n 'DOC-PREAMBLE-REACHED' "$t/hi.tex" 2>/dev/null | head -1 | cut -d: -f1)
+tl_line=$(grep -n 'text-layer.tex' "$t/hi.tex" 2>/dev/null | head -1 | cut -d: -f1)
+if [ -n "$hi_line" ] && [ -n "$tl_line" ] && [ "$hi_line" -gt "$tl_line" ]; then
+  ok "it comes after the tool's styles, so the document can override them"
+else bad "ordering wrong: document at ${hi_line:-?}, styles at ${tl_line:-?}"; fi
+# Control: with no -H at all the variable is intact, so the recovery must not
+# run — otherwise the content is rendered twice.
+"$SS" "$t/hi.md" --no-default-style --keep-tex -o "$t/hi2.pdf" >/dev/null 2>&1
+n=$(grep -c 'usepackage{soul}' "$t/hi2.tex" 2>/dev/null || true)
+if [ "${n:-0}" = "1" ]; then ok "control: not duplicated when no style is passed"
+else bad "control: header-includes appears ${n:-0} times with --no-default-style"; fi
+# Control: a document with none must still build.
+printf -- '---\ntitle: t\n---\n\nx\n' > "$t/nohi.md"
+if "$SS" "$t/nohi.md" -o "$t/nohi.pdf" >/dev/null 2>&1; then
+  ok "control: a document without header-includes still builds"
+else bad "control: a document without header-includes broke"; fi
+
 step "the calt fix reaches a font set in FRONT MATTER"
 # The ordering nobody tested. pandoc emits header-includes after its own font
 # block, so \defaultfontfeatures in text-layer.tex arrives too late for a
