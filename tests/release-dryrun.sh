@@ -38,18 +38,19 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-# Parsed from the release workflow rather than pinned here. Rehearsing with a
-# different goreleaser than the one that publishes would be theatre — and the
-# two drifting apart is exactly the kind of thing nobody notices until a release.
-GORELEASER_VERSION=$(sed -n "s/^ *version: *'\(v[0-9][^']*\)'.*/\1/p" \
-  .github/workflows/release.yml | head -1)
-if [ -z "$GORELEASER_VERSION" ]; then
-  echo "release-dryrun: could not read the goreleaser version from .github/workflows/release.yml"
-  echo "  it must be an exact quoted version, e.g. version: 'v2.17.1'"
+# Both pins come from .tool-versions, the same file goreleaser-action reads via
+# `version-file:`. Rehearsing with a different goreleaser than the one that
+# publishes would be theatre; git-cliff was previously not pinned here at all,
+# which matters because it decides the version number and not only the prose.
+tv () { awk -v k="$1" '$1 == k { print $2; exit }' .tool-versions; }
+GORELEASER_VERSION=v$(tv goreleaser)
+CLIFF_VERSION=$(tv git-cliff)
+if [ "$GORELEASER_VERSION" = "v" ] || [ -z "$CLIFF_VERSION" ]; then
+  echo "release-dryrun: .tool-versions must pin both goreleaser and git-cliff"
   exit 1
 fi
 GORELEASER_IMAGE=goreleaser/goreleaser:$GORELEASER_VERSION
-CLIFF_IMAGE=orhunp/git-cliff:latest
+CLIFF_IMAGE=orhunp/git-cliff:$CLIFF_VERSION
 PORT=8099
 
 if ! command -v docker >/dev/null; then
