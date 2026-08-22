@@ -32,7 +32,23 @@ flag () {
 # written into a comment that explained a previous leak, reached the repository
 # unnoticed. The file now contains only shape rules and synthetic placeholders,
 # so there is nothing to hide and no reason for an exemption.
-scan () { grep -rInIE --exclude-dir=.git --exclude-dir=build -- "$1" . 2>/dev/null; }
+#
+# Scan only what could actually be published: files git tracks, plus files that
+# are untracked and NOT ignored — i.e. everything that is in the repository or
+# one `git add` away from it. Recursing the working directory instead swept in
+# gitignored build output, so `make check` turned red for anyone who had run
+# goreleaser (it grepped dist/config.yaml and flagged goreleaser's own bot
+# address) and stayed green in CI, which always runs on a fresh checkout. A gate
+# whose result depends on whether you happened to build last is a gate people
+# learn to ignore.
+#
+# -z / NUL separators so paths containing spaces or newlines survive.
+publishable () {
+  git ls-files --cached --others --exclude-standard -z 2>/dev/null
+}
+# xargs -0 for NUL safety, -r so empty input does not leave grep reading stdin
+# forever, and -- so a path beginning with a dash is not taken as an option.
+scan () { publishable | xargs -0 -r grep -InIE -- "$1" 2>/dev/null; }
 
 # ── 1. Money ────────────────────────────────────────────────────────────────
 # Real figures leak in EITHER notation. A previous leak reached this repository
@@ -127,7 +143,7 @@ fi
 # ── 10. Optional exact-string layer, kept outside the repository ─────────────
 LIST="${SCHRIFTSATZ_DENYLIST:-$HOME/.config/schriftsatz/denylist.txt}"
 if [ -f "$LIST" ]; then
-  hits=$(grep -rInIFf "$LIST" --exclude-dir=.git --exclude-dir=build . 2>/dev/null || true)
+  hits=$(publishable | xargs -0 -r grep -InIFf "$LIST" 2>/dev/null || true)
   [ -n "$hits" ] && flag "matched the private denylist at $LIST" "$hits"
   echo "no-leaks: exact-string layer applied ($(grep -c . "$LIST") entries)"
 elif [ "${SCHRIFTSATZ_STRICT:-0}" = "1" ]; then
