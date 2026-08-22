@@ -250,18 +250,89 @@ else bad "signature block split: date on p${dp:-?}, name on p${np:-?}"; fi
 fi   # end PDF-only assertions
 
 step "version: one source of truth, no drift"
-# The version lives in CHANGELOG.md and reaches the binary through -ldflags, so
-# there is no constant in the source to fall out of step. This asserts the chain
-# holds end to end.
-v=$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' "$ROOT/CHANGELOG.md" | head -1)
-if [ -n "$v" ]; then ok "CHANGELOG declares a version ($v)"
-else bad "no version section in CHANGELOG.md"; fi
-if "$SS" --version 2>/dev/null | grep -q "$v"; then
-  ok "the binary reports it"
-else bad "binary reports $("$SS" --version 2>/dev/null), CHANGELOG says $v"; fi
+# The git tag is the source. scripts/version.sh is the only thing that reads it,
+# the Makefile injects what that script says through -ldflags, and goreleaser
+# derives {{ .Version }} from the same tag by the same rule (tag minus leading
+# v). Nothing in the source records a version, so there is nowhere for one to
+# drift to — these assertions are what keeps that true.
+v=$("$ROOT/scripts/version.sh")
+if [ -n "$v" ]; then ok "scripts/version.sh prints a version ($v)"
+else bad "scripts/version.sh printed nothing"; fi
+
+# Rebuild first: the version now changes with every commit rather than once per
+# release, so a binary left from the previous commit reports a stale value and
+# this would fail for a reason unrelated to drift.
+make -C "$ROOT" -s bin >/dev/null 2>&1 || true
+# An EXACT field comparison, not `grep -q "$v"`. The substring form matched
+# "0.1.1" inside "0.1.1-dev.5+abc1234" just as happily, so it could not see the
+# drift most likely to happen now that dev versions exist.
+reported=$("$SS" --version 2>/dev/null | awk '{print $NF}')
+if [ "$reported" = "$v" ]; then ok "the binary reports exactly that"
+else bad "binary reports '${reported:-}', version.sh says '$v'"; fi
+
 if [ "$(make -C "$ROOT" -s version 2>/dev/null)" = "$v" ]; then
   ok "make version agrees"
 else bad "make version disagrees"; fi
+
+# A negative control. The three above all pass if the injection path is dead and
+# every reader independently reports the same wrong thing; this one fails in
+# that case, because it forces a value nothing could derive.
+tv="$t/versioned"
+if make -C "$ROOT" -s bin VERSION=9.9.9-drift BIN="$tv" >/dev/null 2>&1 \
+   && [ "$("$tv" --version 2>/dev/null)" = "schriftsatz 9.9.9-drift" ]; then
+  ok "an explicit VERSION reaches the binary (the release path in miniature)"
+else bad "VERSION= did not reach the binary — ldflags injection is broken"; fi
+
+# One source of truth means one implementation. The two shapes a second one
+# takes are asking git directly and parsing a heading out of a changelog; both
+# were real here, with the same sed copied into four files.
+#
+# release.yml and release-dryrun.sh are exempt ONLY until #30 lands: they still
+# read CHANGELOG.md to check a pushed tag against it, which is a guard on the
+# old flow rather than a version source for the build. PR 4 of #30 deletes both
+# readers, and this exemption with them.
+# A subshell with an explicit exit rather than `cd X && ... || true`, which
+# SC2015 flags on the 0.9.0 that CI runs but not on newer local versions.
+# (Do not start that explanation with the linter's name at the beginning of a
+# comment line — it is parsed as a directive and errors with SC1073.)
+# Hoisted out of the command substitution: the escaped `##` inside a quoted
+# argument in a $( ) is mis-parsed by the 0.9.0 that CI runs, which then reports
+# an unrelated "couldn't find fi" hundreds of lines later.
+stray_re='git describe|git tag -l|s/\^## '
+stray_known='^(scripts/version\.sh|tests/run\.sh|tests/release-dryrun\.sh|\.github/workflows/release\.yml)$'
+strays=$(
+  cd "$ROOT" || exit 0
+  git grep -lE "$stray_re" -- Makefile scripts tests .github 2>/dev/null \
+    | grep -vE "$stray_known" \
+    || true
+)
+if [ -z "$strays" ]; then ok "no second place computes a version"
+else bad "these compute a version of their own: $(printf '%s' "$strays" | tr '\n' ' ')"; fi
+
+# A --depth 1 clone fetches no tags, and bare `git describe --tags` exits 128
+# there with "No names found" — which $(shell ...) swallows into an empty
+# -X main.version= and a binary reporting nothing. ci.yml checks out shallow in
+# the filters and pdf jobs, so a version script that dies there would break
+# `make bin` across most of CI with no error surfaced.
+t2="$t/shallow"
+if git clone -q --depth 1 "file://$ROOT" "$t2" >/dev/null 2>&1; then
+  # Copy the script in rather than relying on the clone to carry it: a clone
+  # only has committed files, so otherwise this could not run until the script
+  # was committed — and a test you must commit before you can run is a test
+  # people stop running. What is under test is the script's behaviour where
+  # there are no tags, not whether git cloned it.
+  mkdir -p "$t2/scripts"
+  cp "$ROOT/scripts/version.sh" "$t2/scripts/version.sh"
+  chmod +x "$t2/scripts/version.sh"
+  sv=$(
+    cd "$t2" || exit 0
+    ./scripts/version.sh 2>/dev/null || true
+  )
+  if [ -n "$sv" ]; then ok "version.sh survives a shallow clone with no tags ($sv)"
+  else bad "version.sh printed nothing in a --depth 1 clone"; fi
+else
+  printf '  skip could not make a shallow clone\n'
+fi
 
 step "CLI: argument handling"
 if "$SS" --nonsense >/dev/null 2>&1; then bad "bad option should not exit 0"

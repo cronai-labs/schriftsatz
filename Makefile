@@ -2,15 +2,22 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-# Single source of truth. The binary carries no version constant of its own —
-# it is injected at build time — so there is nowhere for it to drift to.
-# The '#' characters are escaped: unescaped, make reads them as the start of a
-# comment and truncates the $(shell ...) call mid-expression.
-VERSION := $(shell sed -n 's/^\#\# \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | head -1)
+# Single source of truth: the git tag, read by exactly one thing.
+#
+# It used to be the newest heading in CHANGELOG.md, which made the version a
+# TRACKED FILE — and a tracked file only changes on main through a pull request,
+# so cutting a release required one. That ceremony was a consequence of where
+# the version lived, not a policy. See #30.
+#
+# `:=` and not `?=`: `?=` would let a stray VERSION in the environment win
+# silently, and would re-fork the script on every reference. An explicit
+# `make bin VERSION=...` still overrides `:=`, which is what the drift test's
+# negative control relies on.
+VERSION := $(shell ./scripts/version.sh)
 BIN     := build/schriftsatz
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: help setup check test test-fast lint fmt bin build run clean changelog release release-dryrun version
+.PHONY: help setup check test test-fast lint fmt bin build run clean changelog release release-dryrun version next
 
 help: ## List targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -121,8 +128,18 @@ run: ## Build one document: make run DOC=path/to/file.md
 	@$(MAKE) -s build >/dev/null
 	@$(BIN) "$(DOC)"
 
-version: ## Print the version
+version: ## Print the version this tree represents
 	@echo $(VERSION)
+
+next: ## Print the version the next release would carry
+	@# What git-cliff would bump to, given the commits since the last tag.
+	@# This is the number a merge to main will publish once #30 lands.
+	@if command -v git-cliff >/dev/null; then \
+	  git-cliff --bumped-version 2>/dev/null; \
+	else \
+	  docker run --rm -v "$$PWD":/repo -w /repo orhunp/git-cliff:latest \
+	    --bumped-version 2>/dev/null; \
+	fi
 
 release-dryrun: ## Rehearse the whole release against a mock GitHub (needs docker)
 	@# Everything a real release does — build, archive, checksum, create the
@@ -133,13 +150,17 @@ release-dryrun: ## Rehearse the whole release against a mock GitHub (needs docke
 changelog: ## Regenerate CHANGELOG.md from the commit history
 	@# Generated, never hand-edited: each entry's prose is the pull request
 	@# description, which squash-merging puts into the commit body.
+	@# --bump, not --tag: git-cliff computes the next version from the
+	@# Conventional Commits since the last tag. Passing --tag "v$(VERSION)"
+	@# would now pass a DEV version (0.1.1-dev.5+abc1234) and write a heading
+	@# for a release that will never exist.
 	@if command -v git-cliff >/dev/null; then \
-	  git-cliff --tag "v$(VERSION)" -o CHANGELOG.md; \
+	  git-cliff --bump -o CHANGELOG.md; \
 	else \
 	  docker run --rm -v "$$PWD":/repo -w /repo orhunp/git-cliff:latest \
-	    --tag "v$(VERSION)" -o CHANGELOG.md; \
+	    --bump -o CHANGELOG.md; \
 	fi
-	@echo "  CHANGELOG.md regenerated for v$(VERSION)"
+	@echo "  CHANGELOG.md regenerated for $$(make -s next)"
 
 release: ## How to cut a release
 	@echo "Releases are tag-driven and the tag push is a human action:"
