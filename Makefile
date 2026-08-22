@@ -145,8 +145,12 @@ release: ## How to cut a release
 	@echo "Releases are tag-driven and the tag push is a human action:"
 	@echo
 	@echo "  1. make changelog VERSION=X.Y.Z   # regenerate, review, open a PR, merge"
-	@echo "  2. git tag -a vX.Y.Z -m vX.Y.Z"
-	@echo "  3. git push origin vX.Y.Z"
+	@echo "  2. make release-dryrun            # rehearse it against a mock GitHub"
+	@echo "  3. git tag -a vX.Y.Z -m vX.Y.Z"
+	@echo "  4. git push origin vX.Y.Z"
+	@echo
+	@echo "Step 2 is the one that is easy to skip and should not be. A tag is"
+	@echo "immutable, so anything wrong with what it publishes is permanent."
 	@echo
 	@echo "The workflow then validates semver, ancestry and the changelog entry,"
 	@echo "builds every platform, and pushes the Homebrew cask."
