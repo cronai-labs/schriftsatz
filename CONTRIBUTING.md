@@ -82,6 +82,18 @@ test(styles): assert the signature block cannot be split
 **`CHANGELOG.md` is generated, never hand-edited** — `make changelog` regenerates it from the
 history with git-cliff, and the release workflow generates its notes from the same source.
 
+**Rehearse a release before tagging: `make release-dryrun`.** It runs the entire publish path —
+build, archive, checksum, create the release, upload every asset, push the Homebrew cask —
+against a mock GitHub on loopback, and asserts on what goreleaser actually sent. Nothing leaves
+the machine and no tag is created.
+
+This exists because four bugs reached users through a path that could not be tested without
+using it: two releases published an empty body, one shipped a cask whose binary macOS killed on
+sight, and one shipped tarballs containing no documentation. `goreleaser --snapshot` catches
+none of them, because it skips publishing and so never computes a release body. A tag is
+immutable, so anything wrong with what it publishes is permanent — which is what makes the
+rehearsal worth the ninety seconds.
+
 That has a consequence worth knowing before you write a PR description: **your description
 becomes the changelog entry.** Squash-merging puts it into the commit body verbatim, so write
 it for someone reading release notes later, not only for the reviewer today. Sections titled
