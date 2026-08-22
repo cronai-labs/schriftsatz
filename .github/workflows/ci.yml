@@ -186,66 +186,39 @@ jobs:
           # `gitleaks detect` was removed; 8.x exposes git / dir / stdin.
           /tmp/gitleaks git --redact --no-banner .
 
-  package:
-    # Builds the real release artifacts on every PR. v0.1.0 shipped a cask that
-    # installed a binary macOS killed on sight (SIGKILL, no output) because the
-    # unsigned cross-compiled binary keeps Homebrew's com.apple.quarantine
-    # attribute. Nothing caught it: the release job verified the cask was
-    # PUSHED, not that what it installs RUNS.
+  dryrun:
+    # Rehearses the ENTIRE publish path against a mock GitHub. It replaces a
+    # snapshot-only job, which could never have caught the bugs that actually
+    # shipped: --snapshot skips publishing, so it never computes a release body,
+    # and an empty body was the bug twice (#14, #23). The cask that installed an
+    # unrunnable binary (#16) and the tarballs with no docs (#17) came out of the
+    # same blind spot.
+    #
+    # Same script developers run as `make release-dryrun`, so CI and local
+    # cannot drift.
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          # goreleaser reads tags to compute the snapshot version.
+          # git-cliff --current needs the tags and the full history.
           fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Build the release artifacts
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
-        with:
-          args: release --snapshot --clean --skip=publish,validate
-        env:
-          # The cask config templates this in. Never used: publish is skipped.
-          HOMEBREW_TAP_TOKEN: dummy-not-used-snapshot-only
-      - name: The cask must strip the quarantine attribute
+      - name: Rehearse the release against a mock GitHub
+        run: make release-dryrun
+      - name: The rehearsal must leave no residue
         run: |
-          cask=dist/homebrew/Casks/schriftsatz.rb
-          [ -f "$cask" ] || { echo "::error::goreleaser generated no cask"; exit 1; }
-          # Assert on the GENERATED cask, not on .goreleaser.yaml. The config
-          # can carry a hook that fails to render; only the output is evidence.
-          for needle in postflight com.apple.quarantine /usr/bin/xattr; do
-            grep -qF "$needle" "$cask" \
-              || { echo "::error::generated cask lacks $needle — brew install would ship an unrunnable binary"; \
-                   echo "--- cask ---"; cat "$cask"; exit 1; }
-          done
-          echo "cask strips the quarantine attribute"
-      - name: The archives must carry the documentation
-        run: |
-          # goreleaser treats an unmatched `files` glob as a WARNING, so a
-          # pattern that matches nothing ships quietly. v0.1.0 went out with
-          # docs/**/* matching zero files and no documentation in any tarball.
-          tarball=$(ls dist/*_darwin_arm64.tar.gz)
-          listing=$(tar tzf "$tarball")
-          printf '%s\n' "$listing" | sed 's/^/  /'
-          for f in README.md LICENSE CHANGELOG.md; do
-            printf '%s\n' "$listing" | grep -qx "$f" \
-              || { echo "::error::$tarball is missing $f"; exit 1; }
-          done
-          # Every doc in the repo must be in the archive: asserting a fixed
-          # count would pass while a newly added doc silently went missing.
-          missing=0
-          for f in $(git ls-files 'docs/*'); do
-            printf '%s\n' "$listing" | grep -qx "$f" || { echo "::error::$tarball is missing $f"; missing=1; }
-          done
-          [ "$missing" -eq 0 ] || exit 1
-          echo "archive carries every tracked doc"
+          dirty=$(git status --porcelain)
+          if [ -n "$dirty" ]; then
+            echo "::error::the dry run dirtied the working tree"
+            printf '%s\n' "$dirty"
+            exit 1
+          fi
+          echo "working tree clean"
 
   ci-required:
     # The one required check. Everything above feeds it, so the ruleset names a
     # single stable context instead of a list that drifts with the matrix.
-    needs: [filters, pdf, policy, secrets, package]
+    needs: [filters, pdf, policy, secrets, dryrun]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

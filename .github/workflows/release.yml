@@ -99,7 +99,12 @@ jobs:
         # every release rather than first tested when one is needed.
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
         with:
-          version: '~> v2'
+          # An exact version, not a range. tests/release-dryrun.sh rehearses the
+          # whole publish against a mock GitHub using the goreleaser image of
+          # this same version, which it parses out of this line — a rehearsal
+          # against a different version than production is not a rehearsal.
+          # Bump both by bumping this.
+          version: 'v2.17.1'
           args: release --clean --release-notes=/tmp/release-notes.md
         env:
           GITHUB_TOKEN: ${{ github.token }}
