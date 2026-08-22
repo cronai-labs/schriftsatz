@@ -110,7 +110,13 @@ func run(argv []string) int {
 				fmt.Fprintf(os.Stderr, "schriftsatz: no such embedded asset: %s\n", n)
 				return exitUsage
 			}
-			os.Stdout.Write(b)
+			// A short write to stdout is a real failure — a truncated asset
+			// piped into a file looks like a complete one. Reporting exitOK
+			// after it would be a lie the caller cannot detect.
+			if _, err := os.Stdout.Write(b); err != nil {
+				fmt.Fprintf(os.Stderr, "schriftsatz: writing %s: %v\n", n, err)
+				return exitBuild
+			}
 			return exitOK
 		case "-o", "--output":
 			v, ok := next(a)
@@ -238,7 +244,9 @@ func build(in, out, lang, capacity string, styles []string, noDefault, keepTex b
 		fmt.Fprintf(os.Stderr, "schriftsatz: %v\n", err)
 		return exitBuild
 	}
-	defer os.RemoveAll(tmp)
+	// Explicitly discarded: this is best-effort cleanup of a temporary
+	// directory, and there is nothing useful to do if it fails.
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	paths, err := assets.Materialise(tmp)
 	if err != nil {
