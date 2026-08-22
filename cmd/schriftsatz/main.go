@@ -50,6 +50,11 @@ OPTIONS
                        decides, falling back to en-GB.
       --capacity N     Characters per table line for the width filter
                        (default 80; lower for narrower type areas)
+      --tagged         Produce a TAGGED PDF: structure tree plus XMP metadata,
+                       so the document is machine readable and not merely
+                       extractable. Needs pandoc >= 3.9
+      --pdf-standard S Conformance level, implies --tagged: a-3b | ua-2
+                       (validated against veraPDF; others are not offered)
       --keep-tex       Also write the intermediate .tex next to the output
       --print-asset N  Write one embedded asset to stdout (see --list-assets)
       --list-assets    List the embedded filters and styles
@@ -82,7 +87,9 @@ func run(argv []string) int {
 		// document can override it, while this flag has to beat the document.
 		lang               string
 		styles             []string
+		stdName            string
 		noDefault, keepTex bool
+		tagged             bool
 	)
 
 	for i := 0; i < len(argv); i++ {
@@ -153,6 +160,14 @@ func run(argv []string) int {
 				return exitUsage
 			}
 			capacity = v
+		case "--tagged":
+			tagged = true
+		case "--pdf-standard":
+			v, ok := next(a)
+			if !ok {
+				return exitUsage
+			}
+			stdName = v
 		case "--no-default-style":
 			noDefault = true
 		case "--keep-tex":
@@ -185,10 +200,32 @@ func run(argv []string) int {
 		fmt.Fprintf(os.Stderr, "schriftsatz: input not found: %s\n", in)
 		return exitUsage
 	}
+	var standard *pdfStandard
+	if stdName != "" {
+		found, ok := pdfStandards[strings.ToLower(stdName)]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "schriftsatz: unknown PDF standard: %s\n", stdName)
+			fmt.Fprintf(os.Stderr, "  validated standards: %s\n", strings.Join(pdfStandardNames(), ", "))
+			fmt.Fprintln(os.Stderr, "  others are deliberately not offered; see docs/decisions/tagged-pdf.md")
+			return exitUsage
+		}
+		standard = &found
+		tagged = true
+	}
+
 	if code := preflight(); code != exitOK {
 		return code
 	}
-	return build(in, out, lang, capacity, styles, noDefault, keepTex)
+	if tagged {
+		if code := checkTaggingSupport(); code != exitOK {
+			return code
+		}
+	}
+	return build(buildOptions{
+		in: in, out: out, lang: lang, capacity: capacity,
+		styles: styles, noDefault: noDefault, keepTex: keepTex,
+		tagged: tagged, standard: standard,
+	})
 }
 
 // preflight fails early with an actionable message rather than letting pandoc
@@ -222,30 +259,86 @@ func preflight() int {
 // filter dies with "attempt to index a nil value" on anything older.
 var minPandoc = [2]int{2, 17}
 
-func checkPandocVersion() error {
+// minPandocTagging is 3.9. templates/document-metadata.latex — the partial that
+// emits \DocumentMetadata — first ships there (released 2026-02-04,
+// jgm/pandoc#11407). Older pandoc does not know the `pdfstandard` key and
+// ignores it in silence, producing an ordinary untagged PDF from a command that
+// asked for a tagged one. That is the failure mode this project refuses
+// everywhere else, so it is an error and not a downgrade.
+var minPandocTagging = [2]int{3, 9}
+
+// pandocVersion returns the running pandoc's major and minor version, plus the
+// string it reported so a caller can name it.
+func pandocVersion() ([2]int, string, error) {
 	outB, err := exec.Command("pandoc", "--version").Output()
 	if err != nil {
-		return fmt.Errorf("could not run pandoc: %w", err)
+		return [2]int{}, "", fmt.Errorf("could not run pandoc: %w", err)
 	}
 	fields := strings.Fields(strings.SplitN(string(outB), "\n", 2)[0])
 	if len(fields) < 2 {
-		return errors.New("could not parse pandoc --version")
+		return [2]int{}, "", errors.New("could not parse pandoc --version")
 	}
 	got := fields[1]
 	parts := strings.Split(got, ".")
 	if len(parts) < 2 {
-		return fmt.Errorf("could not parse pandoc version %q", got)
+		return [2]int{}, got, fmt.Errorf("could not parse pandoc version %q", got)
 	}
 	maj, _ := strconv.Atoi(parts[0])
 	min, _ := strconv.Atoi(parts[1])
-	if maj < minPandoc[0] || (maj == minPandoc[0] && min < minPandoc[1]) {
+	return [2]int{maj, min}, got, nil
+}
+
+func atLeast(v, want [2]int) bool {
+	return v[0] > want[0] || (v[0] == want[0] && v[1] >= want[1])
+}
+
+func checkPandocVersion() error {
+	v, got, err := pandocVersion()
+	if err != nil {
+		return err
+	}
+	if !atLeast(v, minPandoc) {
 		return fmt.Errorf("pandoc >= %d.%d required for the table-width filter (found %s)",
 			minPandoc[0], minPandoc[1], got)
 	}
 	return nil
 }
 
-func build(in, out, lang, capacity string, styles []string, noDefault, keepTex bool) int {
+// checkTaggingSupport refuses rather than quietly producing an untagged PDF.
+func checkTaggingSupport() int {
+	v, got, err := pandocVersion()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "schriftsatz: %v\n", err)
+		return exitMissing
+	}
+	if !atLeast(v, minPandocTagging) {
+		fmt.Fprintf(os.Stderr,
+			"schriftsatz: --tagged needs pandoc >= %d.%d, found %s\n",
+			minPandocTagging[0], minPandocTagging[1], got)
+		fmt.Fprintln(os.Stderr,
+			"  the template partial that emits \\DocumentMetadata first ships in 3.9.")
+		fmt.Fprintln(os.Stderr,
+			"  older pandoc ignores the request in silence, so this refuses rather")
+		fmt.Fprintln(os.Stderr,
+			"  than handing you an untagged PDF that looks like what you asked for.")
+		return exitMissing
+	}
+	return exitOK
+}
+
+// buildOptions is a struct rather than nine positional parameters, which is
+// what this had grown to.
+type buildOptions struct {
+	in, out, lang, capacity string
+	styles                  []string
+	noDefault, keepTex      bool
+	tagged                  bool
+	standard                *pdfStandard // nil means tagging without a conformance level
+}
+
+func build(opt buildOptions) int {
+	in, out, lang, capacity := opt.in, opt.out, opt.lang, opt.capacity
+	styles, noDefault, keepTex := opt.styles, opt.noDefault, opt.keepTex
 	tmp, err := os.MkdirTemp("", "schriftsatz-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "schriftsatz: %v\n", err)
@@ -315,12 +408,25 @@ func build(in, out, lang, capacity string, styles []string, noDefault, keepTex b
 		fmt.Fprintf(os.Stderr, "schriftsatz: %v\n", err)
 		return exitBuild
 	}
+	metaFiles := []string{defaults}
+
+	if opt.tagged {
+		// A second metadata file rather than a line in the defaults: this one is
+		// asked for on the command line, so it is written separately and the
+		// output is checked afterwards. See confirmTagging.
+		p := filepath.Join(tmp, "tagging.yaml")
+		if err := os.WriteFile(p, []byte(taggingMetadata(opt.standard)), 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "schriftsatz: %v\n", err)
+			return exitBuild
+		}
+		metaFiles = append(metaFiles, p)
+	}
 
 	var filters []string
 	for _, f := range assets.Filters {
 		filters = append(filters, paths[f])
 	}
-	common := pandocArgs(in, defaults, lang, capacity, filters, styles)
+	common := pandocArgs(in, metaFiles, lang, capacity, filters, styles)
 
 	args := append(common, "--pdf-engine=xelatex", "-o", out)
 	cmd := exec.Command("pandoc", args...)
@@ -330,9 +436,20 @@ func build(in, out, lang, capacity string, styles []string, noDefault, keepTex b
 		return exitBuild
 	}
 
+	// Read back what was actually produced. pandoc lets a document's own front
+	// matter override a metadata file, so a file carrying its own `pdfstandard:`
+	// key silently wins over the flag — and a caller told nothing would ship a
+	// PDF that is not what they asked for.
+	if opt.tagged {
+		if err := confirmTagging(out, opt.standard); err != nil {
+			fmt.Fprintf(os.Stderr, "schriftsatz: %v\n", err)
+			return exitBuild
+		}
+	}
+
 	if keepTex {
 		texOut := strings.TrimSuffix(out, filepath.Ext(out)) + ".tex"
-		targs := append(pandocArgs(in, defaults, lang, capacity, filters, styles),
+		targs := append(pandocArgs(in, metaFiles, lang, capacity, filters, styles),
 			"-s", "-t", "latex", "-o", texOut)
 		if err := exec.Command("pandoc", targs...).Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "schriftsatz: could not write %s: %v\n", texOut, err)
@@ -377,8 +494,11 @@ indent: false
 // the --keep-tex list never carried -M table-capacity, so the .tex it produced
 // ignored --capacity and was therefore not the source of the PDF sitting next to
 // it. A debugging aid that hands you the wrong source is worse than none.
-func pandocArgs(in, defaults, lang, capacity string, filters, styles []string) []string {
-	args := []string{in, "--metadata-file", defaults}
+func pandocArgs(in string, metaFiles []string, lang, capacity string, filters, styles []string) []string {
+	args := []string{in}
+	for _, m := range metaFiles {
+		args = append(args, "--metadata-file", m)
+	}
 	for _, f := range filters {
 		args = append(args, "--lua-filter", f)
 	}

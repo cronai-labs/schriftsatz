@@ -2,23 +2,40 @@
 
 ## Scope
 
-This project is deliberately small and intends to stay small. Before opening a feature
-request, please read [docs/why-not.md](docs/why-not.md) — it lists what this project
-does not do and which tool to use instead.
+The project has one claim: **a PDF that is correct to a machine, not only to a reader.**
+That is two things, and a contribution serving either is in scope:
+
+1. The **text layer** is faithful — what you copy out is what is on the page.
+2. The **structure** is present — reading order, table structure, and an archival or
+   accessibility conformance level a downstream system can rely on.
+
+Typesetting a document must be able to control for itself — paper, language, fonts, margins,
+page furniture, house style — is in scope too. Not as a goal of its own, but because a tool
+nobody can produce their own documents with never gets used on the documents where the
+guarantee matters.
+
+Before opening a feature request, please read [docs/why-not.md](docs/why-not.md) — it says
+where this project does not compete and which tool to use instead.
 
 Things that will not be accepted:
 
 - diagram embedding (use [pandoc-ext/diagram](https://github.com/pandoc-ext/diagram))
-- a style-pack configuration language
 - document templates, legal or otherwise
 - HTML, DOCX or EPUB output
-- anything requiring a runtime beyond bash, pandoc and a TeX distribution
+- anything requiring a runtime beyond pandoc and a TeX distribution
+
+Two entries have left that list, and it is worth saying why rather than quietly editing them
+out. *"A style-pack configuration language"* ruled out letting a document declare its own house
+style — which is not a language to design but metadata pandoc already carries, and forbidding it
+meant callers hand-wrote LaTeX inside their Markdown and got `%` and `&` wrong. *"A runtime
+beyond bash"* predates the Go rewrite.
 
 Things that are very welcome:
 
 - a case where `table-widths.lua` allocates badly, with a minimal reproducer
 - confirmation or refutation of the `calt` finding on another platform, TeX
   distribution, PDF extractor or font
+- a document that fails veraPDF at a standard this tool offers, with the rule number
 - portability fixes for Linux and Windows
 - documentation that is clearer or more honest than what is here
 

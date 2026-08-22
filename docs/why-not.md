@@ -75,11 +75,28 @@ today rather than extracted from something already running, Typst would deserve 
 serious look first. The reason it is LaTeX is that the pipeline it came from is LaTeX
 and works.
 
+## Tagged and archival output
+
+**LuaLaTeX** is the engine LaTeX's own tagging project targets, and pandoc's
+`document-metadata.latex` partial says as much. If you need explicit interword marking in the
+structure tree, use it — XeTeX cannot do that part.
+
+What is not widely known, and is why this is here: the rest of tagging **does** work on XeLaTeX.
+Measured against veraPDF, this pipeline produces PDF/A-3b and PDF/UA-2 that validate, with a
+real structure tree, while keeping the OpenType feature control the `calt` fix depends on. That
+combination — `-calt` on the font *and* a tagged, conforming PDF — is the one this project
+needs and did not find elsewhere.
+
+**[Ghostscript](https://www.ghostscript.com)** converts an existing PDF to PDF/A. It cannot
+invent a structure tree that was never in the source, so it solves a different problem.
+
 ## What survives
 
 The text-layer finding is engine-specific (XeTeX) and font-general — it affects anyone
 using a font with case-sensitive punctuation, including through the CTAN `inter` package
 in a stock TeX Live. The width filter is the only published pandoc filter that floors
-columns at their longest unbreakable token and applies to ordinary pipe tables.
+columns at their longest unbreakable token and applies to ordinary pipe tables. And tagged,
+validating PDF/A on XeLaTeX is documented here because the tooling's own comments say it needs
+a different engine.
 
 That is the whole claim.
