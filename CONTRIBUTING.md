@@ -79,8 +79,13 @@ docs(calt): correct the ToUnicode mechanism
 test(styles): assert the signature block cannot be split
 ```
 
-**`CHANGELOG.md` is generated, never hand-edited** — `make changelog` regenerates it from the
-history with git-cliff, and the release workflow generates its notes from the same source.
+**`CHANGELOG.md` is generated and not tracked at all.** It is written at release time from the
+commit history and shipped inside the release archives; the Releases page is the changelog of
+record. `make changelog` writes a local copy if you want one to read.
+
+That is not tidiness. A tracked file can only change on `main` through a pull request, so for as
+long as the version lived in a tracked file, cutting a release required one. Deleting the file
+from git is what removed the ceremony.
 
 **Rehearse a release before tagging: `make release-dryrun`.** It runs the entire publish path —
 build, archive, checksum, create the release, upload every asset, push the Homebrew cask —

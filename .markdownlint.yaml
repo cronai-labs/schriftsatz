@@ -12,3 +12,9 @@ MD034: false
 # A pull request template opens with the first section heading, not a title —
 # GitHub renders the template into a body that never has one.
 MD041: false
+# markdownlint counts the YAML front matter's `title:` as the document's first
+# H1, so a decision record — which carries `title:` in OKF front matter AND an
+# `#` heading in the body — reads as two. Point it at a pattern that matches
+# nothing so only real headings count.
+MD025:
+  front_matter_title: ""

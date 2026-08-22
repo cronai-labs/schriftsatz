@@ -39,3 +39,11 @@ megalinter-reports/
 # Silicon and drops one of these in the repository root.
 core
 core.*
+
+# CHANGELOG.md is GENERATED at release time and shipped inside the release
+# archives — not committed. A tracked file can only change on main through a
+# pull request, so for as long as the version lived in a tracked file, cutting a
+# release needed one. That ceremony was a consequence of this line's absence.
+# The Releases page is the changelog of record; `make changelog` writes a local
+# copy for reading.
+CHANGELOG.md

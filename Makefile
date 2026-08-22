@@ -161,19 +161,24 @@ changelog: ## Regenerate CHANGELOG.md from the commit history
 	fi
 	@echo "  CHANGELOG.md regenerated for $$(make -s next)"
 
-release: ## How to cut a release
-	@echo "Releases are tag-driven and the tag push is a human action:"
+release: ## How releases happen now
+	@echo "Merging a pull request to main publishes the release."
 	@echo
-	@echo "  1. make changelog VERSION=X.Y.Z   # regenerate, review, open a PR, merge"
-	@echo "  2. make release-dryrun            # rehearse it against a mock GitHub"
-	@echo "  3. git tag -a vX.Y.Z -m vX.Y.Z"
-	@echo "  4. git push origin vX.Y.Z"
+	@echo "There is nothing to run here. The version comes from the Conventional"
+	@echo "Commit titles, so the PR TITLE is the version decision:"
 	@echo
-	@echo "Step 2 is the one that is easy to skip and should not be. A tag is"
-	@echo "immutable, so anything wrong with what it publishes is permanent."
+	@echo "  fix: / perf: / docs:   patch      feat:   minor"
+	@echo "  feat!:                 minor while pre-1.0 (cliff.toml [bump])"
 	@echo
-	@echo "The workflow then validates semver, ancestry and the changelog entry,"
-	@echo "builds every platform, and pushes the Homebrew cask."
+	@echo "  make next              what the next release would be called"
+	@echo "  make release-dryrun    rehearse the whole publish against a mock GitHub"
+	@echo
+	@echo "If a publish fails AFTER its tag exists, the tag is permanent and the"
+	@echo "only recovery is to re-run against it:"
+	@echo
+	@echo "  gh workflow run release.yml -f tag=vX.Y.Z"
+	@echo
+	@echo "See docs/decisions/continuous-release.md."
 
 clean: ## Remove generated output
 	@rm -rf build
