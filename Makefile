@@ -55,6 +55,12 @@ lint: ## shellcheck every script
 	  echo "shellcheck not installed — skipped locally, enforced in CI"; \
 	fi
 	@go vet ./... && echo "go vet clean"
+	@# gofmt was enforced nowhere, and cmd/schriftsatz/main.go had been sitting
+	@# unformatted on main as a result. go vet does not check formatting.
+	@unformatted=$$(gofmt -l cmd internal); \
+	 if [ -n "$$unformatted" ]; then \
+	   echo "gofmt would change:"; echo "$$unformatted" | sed 's/^/  /'; exit 1; \
+	 else echo "gofmt clean"; fi
 	@if command -v luacheck >/dev/null; then \
 	  luacheck filters/ && echo "luacheck clean"; \
 	else \

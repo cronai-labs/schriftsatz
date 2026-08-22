@@ -72,9 +72,9 @@ func run(argv []string) int {
 	}
 
 	var (
-		in, out, capacity string
-		lang              = "en-GB"
-		styles            []string
+		in, out, capacity  string
+		lang               = "en-GB"
+		styles             []string
 		noDefault, keepTex bool
 	)
 

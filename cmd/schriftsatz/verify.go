@@ -49,12 +49,23 @@ func verify(pdf string) int {
 	// signature of this defect, because poppler discards PUA codepoints while
 	// others pass them through.
 	if second, ok := extractWithPypdf(pdf); ok {
-		if squash(string(poppler)) != squash(second) {
-			fmt.Printf("FAIL  %s: extractors disagree (poppler vs pypdf)\n", pdf)
-			fmt.Println("      a text layer that depends on the reader is not a text layer")
-			rc = exitFinding
-		} else {
+		switch d := compare(string(poppler), second); d.kind {
+		case agree:
 			fmt.Println("ok    two extractors agree")
+		case hyphenation:
+			// Not a finding. XeLaTeX puts a real hyphen at a hyphenated line
+			// break; pypdf reports it, poppler rejoins the word and drops it.
+			// Both are defensible readings of a correctly encoded PDF, and the
+			// only way to make them agree is to stop hyphenating.
+			fmt.Printf("note  extractors differ by %d line-break hyphen(s) only\n", d.hyphens)
+			fmt.Println("      that is hyphenation, not an encoding fault")
+		default:
+			fmt.Printf("FAIL  %s: extractors disagree on characters (poppler vs pypdf)\n", pdf)
+			fmt.Println("      a text layer that depends on the reader is not a text layer")
+			for _, line := range d.detail {
+				fmt.Printf("      %s\n", line)
+			}
+			rc = exitFinding
 		}
 	} else {
 		fmt.Println("note  only one extractor available; install uv for a cross-check")
@@ -105,14 +116,103 @@ print("".join(p.extract_text() for p in PdfReader(sys.argv[1]).pages))`
 	return "", false
 }
 
-// squash removes all whitespace. pypdf reconstructs gaps from glyph positioning
-// and inserts spaces poppler does not, which says nothing about whether a
-// character is encoded correctly — and encoding is what is under test.
-func squash(s string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsSpace(r) {
-			return -1
+// What the cross-check found. Encoding is what is under test, so the comparison
+// deliberately ignores everything that is a matter of layout interpretation.
+type diffKind int
+
+const (
+	agree diffKind = iota
+	hyphenation
+	characters
+)
+
+type diff struct {
+	kind    diffKind
+	hyphens int
+	detail  []string
+}
+
+// hyphen-like runes a typesetter may insert at a line break.
+func isHyphen(r rune) bool {
+	return r == '-' || r == '\u00ad' || r == '\u2010'
+}
+
+// compare tests whether two extractions carry the same CHARACTERS, as a
+// multiset — not the same sequence.
+//
+// Comparing sequences looks stricter and is simply wrong here. The two
+// extractors disagree about reading order in any multi-column layout: poppler
+// walks a table column by column, pypdf row by row. Identical characters, and
+// an earlier version of this function called that a failure, so `verify`
+// rejected this project's own examples — every document with a table, which is
+// the feature the project is mostly about.
+//
+// A multiset keeps the detection power that matters. The defect under test is a
+// character being dropped or substituted: poppler discards Private Use Area
+// codepoints while pypdf passes them through, and either changes the multiset.
+// Order carries no information about encoding.
+func compare(a, b string) diff {
+	ca, cb := census(a), census(b)
+
+	missing := map[rune]int{}
+	for r, n := range ca {
+		if d := n - cb[r]; d > 0 {
+			missing[r] = d
 		}
-		return r
-	}, s)
+	}
+	for r, n := range cb {
+		if d := n - ca[r]; d > 0 {
+			missing[r] += d
+		}
+	}
+	if len(missing) == 0 {
+		return diff{kind: agree}
+	}
+
+	onlyHyphens, count := true, 0
+	for r, n := range missing {
+		if isHyphen(r) {
+			count += n
+			continue
+		}
+		onlyHyphens = false
+	}
+	if onlyHyphens {
+		return diff{kind: hyphenation, hyphens: count}
+	}
+
+	// Name the offending characters. "extractors disagree" with no detail sends
+	// the reader to a diff of two extractions they have to produce themselves.
+	runes := make([]rune, 0, len(missing))
+	for r := range missing {
+		runes = append(runes, r)
+	}
+	sort.Slice(runes, func(i, j int) bool { return runes[i] < runes[j] })
+
+	detail := make([]string, 0, len(runes))
+	for i, r := range runes {
+		if i == 8 {
+			detail = append(detail, fmt.Sprintf("… and %d more", len(runes)-8))
+			break
+		}
+		where := "poppler"
+		if cb[r] > ca[r] {
+			where = "pypdf"
+		}
+		detail = append(detail, fmt.Sprintf("U+%04X %q ×%d, seen only by %s", r, r, missing[r], where))
+	}
+	return diff{kind: characters, detail: detail}
+}
+
+// census counts non-whitespace runes. pypdf reconstructs gaps from glyph
+// positioning and inserts spaces poppler does not, which says nothing about
+// whether a character is encoded correctly.
+func census(s string) map[rune]int {
+	m := map[rune]int{}
+	for _, r := range s {
+		if !unicode.IsSpace(r) {
+			m[r]++
+		}
+	}
+	return m
 }

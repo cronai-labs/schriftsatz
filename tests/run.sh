@@ -183,6 +183,32 @@ else
   printf '  skip Inter not installed — cannot exercise verify\n'
 fi
 
+step "verify: a table document is not a false positive"
+# The composition nothing tested: the flagship feature (tables) and the flagship
+# check (verify) in one document. verify compared the two extractions as
+# SEQUENCES, and poppler walks a table column by column while pypdf walks it row
+# by row — so verify rejected every table document, this project's own examples
+# included. Deliberately font-independent: reading order has nothing to do with
+# which font is installed, so this runs everywhere rather than only where Inter
+# is present. The negative control for encoding faults lives in
+# cmd/schriftsatz/verify_test.go, which does not need a font at all.
+{
+  printf -- '---\ntitle: t\n---\n\n'
+  printf -- '| Item | Reference | Amount |\n|---|---|---|\n'
+  printf -- '| Consulting services rendered | INV-2026-0042/A | 1.204,00 |\n'
+  printf -- '| Licence, annual | INV-2026-0043/B | 123,45 |\n'
+} > "$t/tbl.md"
+if "$SS" "$t/tbl.md" -o "$t/tbl.pdf" >/dev/null 2>&1; then
+  if "$SS" verify "$t/tbl.pdf" >/dev/null 2>&1; then
+    ok "verify accepts a document containing a table"
+  else
+    bad "verify rejected a table document"
+    "$SS" verify "$t/tbl.pdf" 2>&1 | sed 's/^/       /'
+  fi
+else
+  printf '  skip could not build the table document\n'
+fi
+
 step "formal.tex: imprint is opt-in and never leaks"
 # Use a document that does NOT redefine \docimprint. formal-document.md does,
 # so without formal.tex it fails to build — and an earlier version of this test
