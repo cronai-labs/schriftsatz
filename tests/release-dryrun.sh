@@ -55,6 +55,15 @@ TAG="v$VERSION"
 # build/ is already gitignored and already what `make clean` removes.
 WORK=$REPO/build/dryrun
 cleanup () {
+  # On Linux the container runs as root, so everything it wrote into the bind
+  # mount is root-owned and the calling user cannot delete it — the rehearsal
+  # then succeeds and the script still exits non-zero on the cleanup. macOS
+  # hides this: Docker Desktop maps ownership back to the caller, so it only
+  # ever appears on a CI runner. Hand the files back before removing them.
+  if [ -d "$WORK" ] && [ -n "${GORELEASER_IMAGE:-}" ]; then
+    docker run --rm -v "$WORK":/work --entrypoint sh "$GORELEASER_IMAGE" \
+      -c "chown -R $(id -u):$(id -g) /work" >/dev/null 2>&1 || true
+  fi
   if [ "$KEEP" -eq 1 ]; then echo "kept: $WORK"; return 0; fi
   rm -rf "$WORK"
 }
