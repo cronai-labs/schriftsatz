@@ -65,6 +65,10 @@ npx skills add cronai-labs/schriftsatz
 
 `make` with no target lists everything.
 
+Defaults are supplied only where the document is silent, so `lang`, `papersize`, `fontsize`,
+`documentclass`, `indent`, `mainfont` and `geometry` in the front matter are yours to set.
+Paper is A4 and paragraphs are not first-line indented unless you say otherwise.
+
 **Required:** `pandoc` ≥ 2.17, `xelatex`, and `poppler-utils` (`pdftotext`, `pdfinfo`). The
 suite refuses to run without the extractors rather than pass vacuously on empty output.
 **Optional, skipped with a notice:** `pypdf` for the second-extractor assertions, `qpdf` for

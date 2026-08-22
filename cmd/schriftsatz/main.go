@@ -45,7 +45,9 @@ OPTIONS
                        --list-assets prints, e.g. styles/formal.tex
                        Default: the embedded text-layer and line-breaking styles
       --no-default-style  Drop the defaults; use only the --style files you pass
-      --lang CODE      Document language, e.g. de-DE, en-GB (default: en-GB)
+      --lang CODE      Document language, e.g. de-DE, en-GB. Overrides the
+                       document's own lang: field. Without it the document
+                       decides, falling back to en-GB.
       --capacity N     Characters per table line for the width filter
                        (default 80; lower for narrower type areas)
       --keep-tex       Also write the intermediate .tex next to the output
@@ -74,8 +76,11 @@ func run(argv []string) int {
 	}
 
 	var (
-		in, out, capacity  string
-		lang               = "en-GB"
+		in, out, capacity string
+		// Empty means "not given on the command line", which is a different
+		// thing from en-GB: the default belongs in documentDefaults, where the
+		// document can override it, while this flag has to beat the document.
+		lang               string
 		styles             []string
 		noDefault, keepTex bool
 	)
@@ -305,24 +310,19 @@ func build(in, out, lang, capacity string, styles []string, noDefault, keepTex b
 	}
 	styles = resolved
 
-	args := []string{in, "--pdf-engine=xelatex"}
-	for _, f := range assets.Filters {
-		args = append(args, "--lua-filter", paths[f])
+	defaults := filepath.Join(tmp, "defaults.yaml")
+	if err := os.WriteFile(defaults, []byte(documentDefaults), 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "schriftsatz: %v\n", err)
+		return exitBuild
 	}
-	args = append(args,
-		"-V", "lang="+lang,
-		"-V", "fontsize=11pt",
-		"-V", "documentclass=article",
-		"-V", "indent=false",
-	)
-	for _, s := range styles {
-		args = append(args, "-H", s)
-	}
-	if capacity != "" {
-		args = append(args, "-M", "table-capacity="+capacity)
-	}
-	args = append(args, "-o", out)
 
+	var filters []string
+	for _, f := range assets.Filters {
+		filters = append(filters, paths[f])
+	}
+	common := pandocArgs(in, defaults, lang, capacity, filters, styles)
+
+	args := append(common, "--pdf-engine=xelatex", "-o", out)
 	cmd := exec.Command("pandoc", args...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -332,18 +332,67 @@ func build(in, out, lang, capacity string, styles []string, noDefault, keepTex b
 
 	if keepTex {
 		texOut := strings.TrimSuffix(out, filepath.Ext(out)) + ".tex"
-		targs := []string{in, "-s", "-t", "latex"}
-		for _, f := range assets.Filters {
-			targs = append(targs, "--lua-filter", paths[f])
+		targs := append(pandocArgs(in, defaults, lang, capacity, filters, styles),
+			"-s", "-t", "latex", "-o", texOut)
+		if err := exec.Command("pandoc", targs...).Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "schriftsatz: could not write %s: %v\n", texOut, err)
+			return exitBuild
 		}
-		targs = append(targs, "-V", "lang="+lang)
-		for _, s := range styles {
-			targs = append(targs, "-H", s)
-		}
-		targs = append(targs, "-o", texOut)
-		_ = exec.Command("pandoc", targs...).Run()
+		fmt.Println(texOut)
 	}
 
 	fmt.Println(out)
 	return exitOK
+}
+
+// documentDefaults are applied only where the document is silent about them.
+//
+// They travel by --metadata-file rather than -V, and that is the entire point:
+// pandoc lets a document's own front matter override a metadata file, while -V
+// overrides the document. As -V, a file declaring `lang: de-DE` was typeset with
+// British hyphenation and shipped a catalogue /Lang of en-GB, and a file asking
+// for `documentclass: scrartcl` got article regardless.
+//
+// papersize is a4 because everything in this project already assumes it:
+// filters/table-widths.lua states its capacity was measured for A4 at 11pt, and
+// styles/formal.tex sets a4paper. Without it pandoc's own default applies and
+// the tool shipped US Letter, so adding page furniture silently changed the
+// paper size of a document.
+//
+// indent is a real YAML boolean here, and has to be. As `-V indent=false` it was
+// the non-empty STRING "false", which pandoc's template language treats as true
+// — so the setting that says it disables first-line indentation was switching it
+// on, and every document this tool has built carried it.
+const documentDefaults = `lang: en-GB
+fontsize: 11pt
+documentclass: article
+papersize: a4
+indent: false
+`
+
+// pandocArgs assembles the invocation shared by the PDF build and the --keep-tex
+// dump.
+//
+// One builder rather than two lists written out separately, because they drifted:
+// the --keep-tex list never carried -M table-capacity, so the .tex it produced
+// ignored --capacity and was therefore not the source of the PDF sitting next to
+// it. A debugging aid that hands you the wrong source is worse than none.
+func pandocArgs(in, defaults, lang, capacity string, filters, styles []string) []string {
+	args := []string{in, "--metadata-file", defaults}
+	for _, f := range filters {
+		args = append(args, "--lua-filter", f)
+	}
+	if lang != "" {
+		// -M, not the defaults file. An explicit --lang has to beat the
+		// document, while the default has to lose to it; those are opposite
+		// precedences and pandoc spells them with different flags.
+		args = append(args, "-M", "lang="+lang)
+	}
+	for _, s := range styles {
+		args = append(args, "-H", s)
+	}
+	if capacity != "" {
+		args = append(args, "-M", "table-capacity="+capacity)
+	}
+	return args
 }
