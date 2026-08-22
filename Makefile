@@ -10,7 +10,7 @@ VERSION := $(shell sed -n 's/^\#\# \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.md | hea
 BIN     := build/schriftsatz
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: help setup check test test-fast lint fmt bin build run clean changelog release version
+.PHONY: help setup check test test-fast lint fmt bin build run clean changelog release release-dryrun version
 
 help: ## List targets
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -123,6 +123,12 @@ run: ## Build one document: make run DOC=path/to/file.md
 
 version: ## Print the version
 	@echo $(VERSION)
+
+release-dryrun: ## Rehearse the whole release against a mock GitHub (needs docker)
+	@# Everything a real release does — build, archive, checksum, create the
+	@# release, upload assets, push the cask — against a socket instead of
+	@# github.com. Nothing leaves the machine and no tag is created here.
+	@./tests/release-dryrun.sh
 
 changelog: ## Regenerate CHANGELOG.md from the commit history
 	@# Generated, never hand-edited: each entry's prose is the pull request
