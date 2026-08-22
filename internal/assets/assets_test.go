@@ -6,9 +6,10 @@ import (
 	"testing"
 )
 
-// go:embed cannot reach outside its own package directory, so the filters and
-// styles exist twice: canonically at the repository root, where a reader clones
-// or copies them and where the docs point, and again here to be embedded.
+// The //go:embed directive cannot reach outside its own package directory, so
+// the filters and styles exist twice: canonically at the repository root,
+// where a reader clones or copies them and where the docs point, and again
+// here to be embedded.
 //
 // Two copies of anything drift. This test is the thing that stops it, and it is
 // the reason `make build` regenerates the embedded copies rather than trusting

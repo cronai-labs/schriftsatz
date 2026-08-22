@@ -238,7 +238,17 @@ jobs:
         # than a silently skipped check.
         uses: oxsecurity/megalinter/flavors/go@15e5b45552097e318c93de385779ce3b1084052c  # v10.0.0
         env:
-          VALIDATE_ALL_CODEBASE: ${{ github.event_name != 'pull_request' }}
+          # ALWAYS the whole codebase, including on pull requests.
+          #
+          # MegaLinter's default lints only CHANGED files on a pull request, and
+          # that default let a green pull request turn main red: #34 passed its
+          # own checks and then failed on main with five golangci-lint findings
+          # in files it had never touched. A gate whose verdict depends on which
+          # files a branch happened to modify is not a gate on the repository.
+          #
+          # The cost is bounded — 54 files, and the job runs in about 75 seconds
+          # either way. Revisit if the repository grows enough for that to hurt.
+          VALIDATE_ALL_CODEBASE: true
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Both reporters need pull-requests: write, which this workflow
           # deliberately does not have. Left on, they POST on every run and log

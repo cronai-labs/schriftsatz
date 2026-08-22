@@ -70,7 +70,7 @@ func main() {
 	// The orchestrating script waits for this line rather than sleeping, so a
 	// slow start cannot turn into a flaky "connection refused".
 	fmt.Println("mockgh: listening on", *addr)
-	os.Stdout.Sync()
+	_ = os.Stdout.Sync()
 	log.Fatal(http.Serve(ln, s))
 }
 
@@ -193,7 +193,7 @@ func (s *server) record(name string, data []byte, appendMode bool) {
 		log.Printf("mockgh: record %s: %v", name, err)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.Write(data); err != nil {
 		log.Printf("mockgh: write %s: %v", name, err)
 	}
