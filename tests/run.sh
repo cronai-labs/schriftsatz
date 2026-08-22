@@ -407,6 +407,25 @@ else
   printf '  skip could not build the table document\n'
 fi
 
+# Tagged output needs BOTH a recent pandoc and a recent LaTeX kernel, and the
+# second is the one that bites: \DocumentMetadata gained the `tagging` key in
+# the 2024-11-01 release, while Ubuntu 24.04 and Debian 13 ship an older TeX
+# Live. Probe the engine rather than parsing a version out of it — the question
+# is whether the key exists, and that is exactly what this asks.
+tagging_supported () {
+  local probe="$t/tagprobe"
+  mkdir -p "$probe"
+  cat > "$probe/p.tex" <<'PROBEEOF'
+\DocumentMetadata{tagging=on}
+\documentclass{article}
+\begin{document}x\end{document}
+PROBEEOF
+  ( cd "$probe" && xelatex -interaction=nonstopmode p.tex >p.out 2>&1 ) || return 1
+  ! grep -q 'document/metadata/tagging' "$probe/p.out"
+}
+
+if tagging_supported; then
+
 step "tagged output: a structure tree and XMP, on XeLaTeX"
 # A faithful text layer is only half of "machine readable". Without a structure
 # tree a reader has glyphs and positions and nothing else — no reading order, no
@@ -521,6 +540,12 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   rm -rf "$vera"
 else
   printf '  skip docker not available — veraPDF validation runs in CI\n'
+fi
+
+else
+  printf '\n\033[1mtagged output\033[0m\n'
+  printf '  skip LaTeX kernel predates the DocumentMetadata `tagging` key\n'
+  printf '       (needs the 2024-11-01 release or newer; see issue #59)\n'
 fi
 
 step "formal.tex: imprint is opt-in and never leaks"

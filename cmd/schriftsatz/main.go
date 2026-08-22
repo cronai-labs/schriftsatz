@@ -3,8 +3,10 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -259,6 +261,16 @@ func preflight() int {
 // filter dies with "attempt to index a nil value" on anything older.
 var minPandoc = [2]int{2, 17}
 
+// taggingKeyUnknown is what an older LaTeX kernel says when \DocumentMetadata
+// does not know the `tagging` key. Matched to turn a message about an internal
+// key path into one about the reader's TeX distribution.
+//
+// A version check would be the obvious alternative and is worse: there is no
+// cheap, portable way to ask a TeX distribution for its kernel date, and the
+// answer would still have to be mapped to which keys exist. The engine's own
+// complaint is the authority.
+const taggingKeyUnknown = "document/metadata/tagging"
+
 // minPandocTagging is 3.9. templates/document-metadata.latex — the partial that
 // emits \DocumentMetadata — first ships there (released 2026-02-04,
 // jgm/pandoc#11407). Older pandoc does not know the `pdfstandard` key and
@@ -430,9 +442,25 @@ func build(opt buildOptions) int {
 
 	args := append(common, "--pdf-engine=xelatex", "-o", out)
 	cmd := exec.Command("pandoc", args...)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	// Tee stderr when tagging: the LaTeX kernel can be too old for
+	// \DocumentMetadata even when pandoc is new enough, and the error it emits
+	// names an internal key path that tells a caller nothing. Keep streaming it
+	// so nothing is hidden, and read it back to add the sentence that helps.
+	var log bytes.Buffer
+	if opt.tagged {
+		cmd.Stderr = io.MultiWriter(os.Stderr, &log)
+	} else {
+		cmd.Stderr = os.Stderr
+	}
+	cmd.Stdout = os.Stdout
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "schriftsatz: pandoc/xelatex failed building %s\n", in)
+		if opt.tagged && strings.Contains(log.String(), taggingKeyUnknown) {
+			fmt.Fprintln(os.Stderr, "  the LaTeX kernel is too old for tagged output.")
+			fmt.Fprintln(os.Stderr, "  \\DocumentMetadata gained the `tagging` key in the 2024-11-01")
+			fmt.Fprintln(os.Stderr, "  release; Debian 13 and Ubuntu 24.04 ship an older TeX Live.")
+			fmt.Fprintln(os.Stderr, "  Update your TeX distribution, or drop --tagged/--pdf-standard.")
+		}
 		return exitBuild
 	}
 
