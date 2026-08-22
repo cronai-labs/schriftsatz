@@ -178,13 +178,37 @@ echo "/tests/mockgh/" >>"$WORK/src/.git/info/exclude"
 # file: HEAD" — the bind mount has not settled, and .git/HEAD reads short. It
 # succeeds on the next attempt. This sits on the path that determines the
 # version, so a transient here would be read as "nothing to release".
+# --latest when there is nothing releasable, --current otherwise.
+#
+# --current renders the release the CURRENT COMMIT is tagged for, and on the
+# synthetic path there is no such release: HEAD is already the last one, so the
+# range is empty and git-cliff exits with "No tag exists for the current
+# commit". Running the rehearsal on main right after a release hit exactly that.
+# --latest renders the previous release instead, which is the right content for
+# a run whose purpose is proving the MECHANICS rather than the render.
+if [ "$SYNTHETIC" -eq 1 ]; then
+  cliff_range=--latest
+else
+  cliff_range=--current
+fi
+
 cliff_ok=0
 for attempt in 1 2 3; do
   if docker run --rm -v "$WORK/src":/repo -w /repo "$CLIFF_IMAGE" \
-       --current --strip header >"$WORK/notes.md" 2>"$WORK/cliff.err"; then
+       "$cliff_range" --strip header >"$WORK/notes.md" 2>"$WORK/cliff.err"; then
     cliff_ok=1; break
   fi
-  echo "  git-cliff attempt $attempt failed, retrying"
+  # Retry ONLY the known transient. The first container invocation after a
+  # host-side git write intermittently dies inside libgit2 with "corrupted loose
+  # reference file"; that is worth a second attempt. Anything else is
+  # deterministic, and retrying it three times turns a clear error message into
+  # "failed after 3 attempts" — which is how a real bug reads as flakiness.
+  if ! grep -qi 'corrupted loose reference\|could not read' "$WORK/cliff.err"; then
+    echo "release-dryrun: git-cliff failed and this is not the known transient"
+    sed 's/^/  /' "$WORK/cliff.err"
+    exit 1
+  fi
+  echo "  git-cliff hit the libgit2 transient (attempt $attempt), retrying"
   sleep 1
 done
 if [ "$cliff_ok" -ne 1 ]; then
