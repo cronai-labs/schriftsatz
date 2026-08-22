@@ -1,0 +1,11 @@
+# golangci-lint replaces the hand-rolled `go vet` + `gofmt -l` pair in the
+# Makefile. gofmt is included as a LINTER here rather than a separate step so
+# formatting is enforced by the same pinned container as everything else —
+# cmd/schriftsatz/main.go sat unformatted on main for weeks because go vet does
+# not check formatting and nothing else did.
+version: "2"
+linters:
+  default: standard        # errcheck, govet, ineffassign, staticcheck, unused
+formatters:
+  enable:
+    - gofmt

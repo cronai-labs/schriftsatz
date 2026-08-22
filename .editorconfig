@@ -1,0 +1,33 @@
+# Describes what is already true here, not a new convention. Asserting a global
+# indent_style/indent_size would report several hundred findings across shell,
+# Go, LaTeX, Lua and Markdown that are all correct as written — a linter whose
+# first run demands reformatting the repository is one people switch off.
+#
+# What is asserted is the hygiene that is genuinely universal and that a stray
+# editor setting silently breaks.
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+charset = utf-8
+
+# Deliberately NO indent_style anywhere, including for Make and Go, where tabs
+# are genuinely required. editorconfig-checker reads "tab, then spaces" as mixed
+# indentation, and that is the correct and unavoidable shape in both:
+#
+#   Makefile   a recipe line must begin with a tab, and its shell continuations
+#              are then aligned with spaces for readability — 16 findings
+#   *.go       gofmt indents with tabs and aligns with spaces inside var blocks,
+#              struct literals and trailing comments — 23 findings in one file
+#
+# Both are already enforced, and more strictly than this could: a space-indented
+# recipe line is a hard make syntax error, and gofmt is checked by golangci-lint.
+# Asserting it a second time only produces findings whose only fix is to break
+# the file. Two tools disagreeing about the same line is how a gate gets
+# switched off entirely.
+
+# Markdown uses trailing double-space as a hard line break in some places.
+[*.md]
+trim_trailing_whitespace = false

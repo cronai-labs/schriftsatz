@@ -72,7 +72,7 @@ checked in CI. Branch commits are not linted, because the PR is squashed and the
 becomes the commit subject on `main` — that subject is what ends up in the changelog and is
 what gets reverted, so it is the thing worth enforcing:
 
-```
+```text
 feat(filters): allow table capacity to be set from document metadata
 fix(cli): write output next to the input instead of into the tool directory
 docs(calt): correct the ToUnicode mechanism

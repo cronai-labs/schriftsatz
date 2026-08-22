@@ -115,7 +115,10 @@ jobs:
             || { echo "Inter not found by kpathsea or fontconfig"; fc-list | head; exit 1; }
 
       - run: make setup
-      - run: make check
+      # `make test`, not `make check`: linting is the megalinter job's
+      # business now, and running it here too would mean two different
+      # shellchecks disagreeing about the same files.
+      - run: make test
       - run: make build
 
       - name: Working tree must be clean after a build
@@ -215,10 +218,43 @@ jobs:
           fi
           echo "working tree clean"
 
+  megalinter:
+    # The single lint gate. It replaced shellcheck, go vet, gofmt, actionlint
+    # and a formatting loop invoked directly from the Makefile, each from
+    # whatever version the machine happened to have — local shellcheck 0.11.0
+    # and CI's apt 0.9.0 disagreed twice over, so `make lint` passing locally
+    # said nothing about whether the merge would be blocked.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # MegaLinter lints only changed files on a pull request, which needs
+          # history to diff against.
+          fetch-depth: 0
+      - name: MegaLinter
+        # The go flavor carries every linter enabled in .mega-linter.yml, and
+        # FAIL_IF_MISSING_LINTER_IN_FLAVOR makes a wrong flavor an error rather
+        # than a silently skipped check.
+        uses: oxsecurity/megalinter/flavors/go@15e5b45552097e318c93de385779ce3b1084052c  # v10.0.0
+        env:
+          VALIDATE_ALL_CODEBASE: ${{ github.event_name != 'pull_request' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Both reporters need pull-requests: write, which this workflow
+          # deliberately does not have. Left on, they POST on every run and log
+          # a 403 that reads like a failure but is not one.
+          GITHUB_COMMENT_REPORTER: false
+          GITHUB_STATUS_REPORTER: false
+      - name: Lint the Lua filters
+        # Not a MegaLinter linter: LUA_LUACHECK ships in no flavor.
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq lua-check
+          luacheck filters/
+
   ci-required:
     # The one required check. Everything above feeds it, so the ruleset names a
     # single stable context instead of a list that drifts with the matrix.
-    needs: [filters, pdf, policy, secrets, dryrun]
+    needs: [filters, pdf, policy, secrets, dryrun, megalinter]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

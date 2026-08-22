@@ -66,7 +66,7 @@ Every one of them has a cmap entry, in the Private Use Area (`U+E000`–`U+F8FF`
 **It is not that XeTeX fails to write a ToUnicode table.** It writes one, and it is accurate.
 Dumping it from the unfixed PDF above:
 
-```
+```text
 34 ToUnicode entries, 3 of which map into the PUA
   glyph <05A8> -> U+EE4E
   glyph <05A9> -> U+EE4F

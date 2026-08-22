@@ -15,7 +15,7 @@ as wide as its content needs and is then centred, often leaving slack in the typ
 **If a source line does exceed `--columns`**, pandoc emits explicit relative widths
 derived from **the number of dashes you typed in the separator row**. So:
 
-```
+```markdown
 |:-----------------------------------|:---------|---:|     →  0.7200 / 0.2000 / 0.0800
 |:---|:---|---:|                                            →  0.3333 / 0.3333 / 0.3333
 ```
@@ -84,7 +84,7 @@ of a table, and it depends on your type area, body size and whether tables are s
 smaller than body text. The default 80 is calibrated for A4, 11 pt, tables one step
 down.
 
-```
+```sh
 pandoc doc.md -M table-capacity=65 --lua-filter filters/table-widths.lua ...
 ```
 
