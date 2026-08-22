@@ -1,0 +1,13 @@
+# One place pins the release toolchain.
+#
+# goreleaser-action reads this file via `version-file:`, tests/release-dryrun.sh
+# reads both entries to choose its container images, and mise/asdf install the
+# same versions locally. Before this, the goreleaser version was a quoted string
+# in release.yml that the rehearsal parsed back out with sed, and git-cliff was
+# pinned nowhere at all — the rehearsal ran `:latest`.
+#
+# That matters more than it looks once #30 lands: git-cliff decides the VERSION
+# NUMBER, not just the prose. Which git-cliff runs is then part of the release,
+# and `:latest` silently changing it is not something a review would catch.
+goreleaser 2.17.1
+git-cliff 2.13.1
