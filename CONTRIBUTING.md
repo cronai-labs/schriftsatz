@@ -109,8 +109,28 @@ Homebrew cask for a README typo. But it cuts both ways, so it is worth being blu
 `make next` tells you what the next release will be called — including "no change", which is how
 you check before merging that you titled it the way you meant to.
 
-**Small PRs do not mean noisy releases.** Merging a stack in quick succession produces **one**
-release, not one per PR: the release job releases the tip of `main` and earlier runs defer to it.
+**Small PRs do not mean noisy releases — a stack is how several changes ship as one version.**
+GitHub's stack merge updates `main` in a **single ref update** carrying every squash commit, so
+the push that starts CI happens once and one release is cut. Measured on the six pull requests
+that became v0.3.0 (2026-08-23):
+
+```text
+PushEvents on refs/heads/main:  3dc75f3..67bdc39   <- one, carrying all six commits
+CI runs on main, intermediate:  0                  <- the five middle commits never built
+CI runs on main, tip:           1
+Release runs:                   1
+git log --merges v0.2.2..main:  0                  <- history stays linear
+```
+
+Two things follow, and both are easy to get wrong:
+
+- **Merging the layers by hand is a different path.** That produces one push per merge, and it is
+  the release workflow's "release the tip of `main`, or nothing" step that stops a version number
+  being spent on an intermediate state. That logic protects a *hand* merge; it is not what makes a
+  stack merge quiet. Do not remove it on the grounds that the stack merge handles it.
+- **The intermediate commits of a stack are never built on `main`.** A stack that was green layer
+  by layer before merging is not re-verified layer by layer afterwards — only the tip is. If a
+  middle layer is the one you doubt, that doubt has to be settled before the merge.
 
 **`CHANGELOG.md` is generated and not tracked at all.** It is written at release time from the
 commit history and shipped inside the release archives; the Releases page is the changelog of

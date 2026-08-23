@@ -119,8 +119,15 @@ jobs:
             echo "current=true" >>"$GITHUB_OUTPUT"
             exit 0
           fi
-          # Three stacked pull requests merging in sequence produce three pushes,
-          # and the runs queue behind the concurrency group. Tagging the commit
+          # This is for stacked pull requests merged BY HAND, one at a time:
+          # each merge is its own push, and the runs queue behind the
+          # concurrency group. GitHub's native stack merge does not take this
+          # path at all — it updates main in a single ref update carrying every
+          # squash commit, so there is one push, one CI run and one release, and
+          # this step never defers. Measured on the six pull requests that became
+          # v0.3.0: one PushEvent, 3dc75f3..67bdc39, no runs for the five
+          # intermediate commits. Keep this anyway; the hand path is real and is
+          # the one that can spend a version number wrongly. Tagging the commit
           # this run was triggered for would spend a version number on an
           # intermediate state of a stack that nobody asked to ship — and that
           # tag could never be withdrawn. The run for the current tip covers this
