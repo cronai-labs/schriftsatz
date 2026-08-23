@@ -142,6 +142,82 @@ if "$SS" "$ROOT/examples/minimal.md" -o "$t/out.pdf" >"$t/cli.log" 2>&1; then
   else printf '  skip qpdf not installed\n'; fi
 else bad "CLI build failed"; sed -n '1,12p' "$t/cli.log" | sed 's/^/       /'; fi
 
+step "examples: each builds with the command it documents"
+# The gate used to build the examples with a style set only the Makefile knew:
+# --style for text-layer, linebreaking and formal, on every example. So CI proved
+# a command no reader was given, while `schriftsatz examples/formal-document.md`
+# — the command the documentation implies — failed on an undefined \docimprint.
+#
+# Each example now carries its own build command, and this runs THAT, verbatim,
+# from the repository root. The documentation is the gate, so the two cannot
+# drift. Output goes to the default path on purpose: where a build lands is part
+# of what the command promises.
+for f in "$ROOT"/examples/*.md; do
+  name=$(basename "$f" .md)
+  cmd=$(grep -m1 '^schriftsatz ' "$f")
+  if [ -z "$cmd" ]; then bad "$name documents no build command"; continue; fi
+  out="$ROOT/examples/$name.pdf"
+  rm -f "$out"
+  # Deliberately unquoted: the documented command is a line of arguments, and
+  # splitting it on spaces is the point.
+  # shellcheck disable=SC2086
+  if ( cd "$ROOT" && "$SS" ${cmd#schriftsatz } ) >"$t/ex-$name.log" 2>&1; then
+    if [ -s "$out" ]; then ok "$name builds with the command it documents"
+    else bad "$name reported success but wrote no PDF at $out"; fi
+  else
+    bad "$name does not build with the command it documents: $cmd"
+    sed -n '1,10p' "$t/ex-$name.log" | sed 's/^/       /'
+  fi
+  rm -f "$out"
+done
+
+step "--style: names an embedded style from a directory that is not a clone"
+# The trap this replaces: `--style styles/formal.tex` appeared to work, because
+# that relative path exists in a clone. Run it somewhere it does not.
+printf -- '---\ntitle: t\n---\n\nPlain.\n' > "$t/emb.md"
+if ( cd "$t" && "$SS" "$t/emb.md" --style styles/formal.tex -o "$t/emb.pdf" ) >"$t/emb.log" 2>&1 \
+   && [ -s "$t/emb.pdf" ]; then
+  ok "embedded style resolved by name outside the repository"
+else
+  bad "embedded style could not be named outside the repository"
+  sed -n '1,8p' "$t/emb.log" | sed 's/^/       /'
+fi
+# A name that is neither a file nor embedded must be a usage error, not a
+# xelatex failure hundreds of lines later.
+if ( cd "$t" && "$SS" "$t/emb.md" --style styles/nope.tex -o "$t/nope.pdf" ) >/dev/null 2>&1; then
+  bad "an unknown style name did not fail"
+elif [ $? -eq 2 ]; then ok "an unknown style name exits 2 (control)"
+else bad "an unknown style name exited with the wrong code"; fi
+
+step "--style adds to the defaults rather than replacing them"
+# The regression: --style used to DROP the default set, so `--style
+# styles/formal.tex` — the documented way to add a footer — built without
+# text-layer.tex and silently reintroduced the calt defect.
+#
+# The font is set in a header passed AFTER the styles, which is the ordering
+# where \defaultfontfeatures reaches it. A font set in front matter is a
+# different ordering and a separate defect; see the issue linked from
+# styles/text-layer.tex.
+cat > "$t/setfont.tex" <<'SFEOF'
+\usepackage{fontspec}
+\setmainfont{Inter-Regular.otf}
+SFEOF
+printf -- '---\ntitle: t\n---\n\nMaterialaufwand −123,45\n' > "$t/add.md"
+if "$SS" "$t/add.md" --style styles/formal.tex --style "$t/setfont.tex" -o "$t/add.pdf" >/dev/null 2>&1 \
+   && [ -s "$t/add.pdf" ]; then
+  got=$(pdftotext "$t/add.pdf" - 2>/dev/null | tr -d '[:space:]')
+  case "$got" in *"−123,45"*) ok "text-layer fix survives adding a style" ;;
+                 *) bad "adding a style dropped the text-layer fix" ;; esac
+  # Negative control: --no-default-style must still drop them, or the flag is a
+  # no-op and this assertion proves nothing.
+  "$SS" "$t/add.md" --no-default-style --style "$t/setfont.tex" -o "$t/nodef.pdf" >/dev/null 2>&1
+  none=$(pdftotext "$t/nodef.pdf" - 2>/dev/null | tr -d '[:space:]')
+  case "$none" in *"−123,45"*) bad "control: --no-default-style did not drop the defaults" ;;
+                  *) ok "control: --no-default-style drops them" ;; esac
+else
+  printf '  skip Inter not installed — cannot exercise the style ordering\n'
+fi
+
 step "text-layer.tex applies the fix, not just a comment about it"
 # This is the assertion the project most needs and least obviously needs: the
 # LaTeX default font never exhibits the defect, so a fragment that documents the

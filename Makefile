@@ -98,14 +98,6 @@ fmt: ## Report formatting problems (trailing whitespace, tabs, missing final new
 check: lint test ## What CI runs
 	@./tests/no-leaks.sh
 
-# Examples are built with the FULL style set. formal-document.md redefines
-# \docimprint, which only exists once formal.tex is included — building the
-# examples with the default set would fail on it, and that failure is the point
-# of having this target at all.
-# Examples are built with the FULL style set. formal-document.md redefines
-# \docimprint, which only exists once formal.tex is included.
-STYLES := --style styles/text-layer.tex --style styles/linebreaking.tex --style styles/formal.tex
-
 bin: ## Compile the binary only (no TeX needed)
 	@# Separate from `build` because compiling needs Go and nothing else, while
 	@# building the examples needs a TeX distribution. The fast CI job has the
@@ -117,9 +109,20 @@ bin: ## Compile the binary only (no TeX needed)
 	@echo "  $(BIN) ($(VERSION))"
 
 build: bin ## Compile the binary and build every example (needs TeX)
+	@# Each example is built with the command IT documents, extracted from its
+	@# own text — not with a flag set only this Makefile knows.
+	@#
+	@# It used to pass --style for text-layer, linebreaking and formal to every
+	@# example. That is why `schriftsatz examples/formal-document.md`, the
+	@# command the documentation implies, failed for every reader while CI stayed
+	@# green: the gate proved a different command from the one on offer. Only -o
+	@# is added, to put the artefact in build/ rather than beside the input.
 	@for f in examples/*.md; do \
-	  $(BIN) "$$f" $(STYLES) -o "build/$$(basename "$${f%.md}").pdf" >/dev/null || exit 1; \
-	  echo "  build/$$(basename "$${f%.md}").pdf"; \
+	  cmd=$$(grep -m1 '^schriftsatz ' "$$f"); \
+	  [ -n "$$cmd" ] || { echo "$$f documents no build command"; exit 1; }; \
+	  out="build/$$(basename "$${f%.md}").pdf"; \
+	  $(BIN) $${cmd#schriftsatz } -o "$$out" >/dev/null || exit 1; \
+	  echo "  $$out"; \
 	done
 
 run: ## Build one document: make run DOC=path/to/file.md

@@ -39,7 +39,14 @@ Use the fully-qualified name: Homebrew 6.0 added tap trust, and an unqualified
 `brew install schriftsatz` after `brew tap` is refused.
 
 The binary carries its own Lua filters and LaTeX fragments — `--list-assets` to see them,
-`--print-asset <name>` to read one out.
+`--print-asset <name>` to read one out, and `--style <name>` to use one:
+
+```bash
+schriftsatz document.md --style styles/formal.tex   # adds the footer and signature line
+```
+
+`--style` also takes a path to a header of your own, and adds to the default styles rather than
+replacing them. `--no-default-style` drops the defaults — including the text-layer fix.
 
 From a clone:
 

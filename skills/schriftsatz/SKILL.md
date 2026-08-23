@@ -27,11 +27,15 @@ schriftsatz document.md --lang de-DE       # affects hyphenation
 ```
 
 Two styles are applied by default: text-layer correctness and line breaking. Page furniture —
-footer, signature line, letterhead — is opt-in:
+footer, signature line, letterhead — is opt-in. `--style` takes any name
+`schriftsatz --list-assets` prints, so a shipped style never has to be written to a file first:
 
 ```bash
-schriftsatz doc.md --style "$(schriftsatz --print-asset styles/formal.tex > /tmp/f.tex; echo /tmp/f.tex)"
+schriftsatz doc.md --style styles/formal.tex
 ```
+
+`--style` **adds to** the defaults; it does not replace them. `--no-default-style` drops them,
+which also drops the text-layer fix — do not reach for it to "start clean".
 
 Inspect what the binary carries with `schriftsatz --list-assets`.
 

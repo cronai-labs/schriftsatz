@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 //go:embed filters/*.lua styles/*.tex
@@ -66,6 +67,20 @@ func Materialise(dir string) (map[string]string, error) {
 
 // Read returns one embedded asset, for callers that want to print it.
 func Read(name string) ([]byte, error) { return files.ReadFile(name) }
+
+// Styles returns the embedded style names, under exactly the names List
+// reports. A --style value is matched against these, which is what lets a
+// caller name the page furniture the binary carries without writing it out to
+// a file first.
+func Styles() []string {
+	var out []string
+	for _, n := range List() {
+		if strings.HasPrefix(n, "styles/") {
+			out = append(out, n)
+		}
+	}
+	return out
+}
 
 // List returns every embedded asset name, sorted by fs.WalkDir order.
 func List() []string {

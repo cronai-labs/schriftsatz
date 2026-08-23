@@ -4,6 +4,12 @@ title: Table Width Fixture
 
 # What this fixture shows
 
+Build it with:
+
+```
+schriftsatz examples/wide-table.md
+```
+
 Every line of the table below is longer than pandoc's `--columns` default, so
 pandoc emits explicit relative widths. The separator row uses uniform dashes,
 which gives pandoc no content signal at all — so it falls back to an equal

@@ -20,6 +20,17 @@ lang: en-GB
 Every name, address, registration number and figure in this file is invented. It
 exists to demonstrate the style, not to model any real organisation.
 
+Build it with:
+
+```
+schriftsatz examples/formal-document.md --style styles/formal.tex
+```
+
+`styles/formal.tex` is named here, not on disk: `--style` accepts any name
+`schriftsatz --list-assets` prints, so the styles the binary carries are reachable
+from any directory. The default text-layer and line-breaking styles still apply —
+`--style` adds to them.
+
 ## 1. What this example shows
 
 Three things `styles/formal.tex` provides, none of which are switched on by
