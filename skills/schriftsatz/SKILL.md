@@ -23,8 +23,33 @@ looks for it until a number has already been copied wrongly.
 ```bash
 schriftsatz document.md                    # → document.pdf, next to the input
 schriftsatz document.md -o out/report.pdf
-schriftsatz document.md --lang de-DE       # affects hyphenation
+schriftsatz document.md --lang de-DE       # overrides the document's own lang:
 ```
+
+## What the document controls
+
+Prefer front matter to flags. The tool supplies defaults only where the document is silent, so
+anything set here wins:
+
+```yaml
+---
+title: Statement of account
+lang: de-DE          # hyphenation, and the PDF catalogue's /Lang
+papersize: a4        # the default; letter, a5 … are yours to choose
+fontsize: 11pt
+documentclass: article
+indent: false        # block paragraphs; true for first-line indentation
+mainfont: Inter      # any font fontspec can find
+geometry:            # margins
+  - top=30mm
+  - left=25mm
+---
+```
+
+`--lang` is the one flag that overrides the document, because a caller rebuilding someone
+else's file needs a way to. Everything else is the document's decision.
+
+Two defaults worth knowing: paper is **A4**, and paragraphs are **not** first-line indented.
 
 Two styles are applied by default: text-layer correctness and line breaking. Page furniture —
 footer, signature line, letterhead — is opt-in. `--style` takes any name

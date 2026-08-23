@@ -131,11 +131,19 @@ if [ "$PDF" -eq 1 ]; then
 step "CLI: builds, writes where told, does not pollute its own tree"
 # Keep the build log: "CLI build failed" with no reason cost several CI round
 # trips to diagnose a missing babel language package.
+# Snapshot BEFORE the run. Searching the whole tree instead reported a leftover
+# examples/minimal.pdf as though this run had produced it — and that file is
+# written by following the documentation, which tells the reader to run
+# `schriftsatz examples/minimal.md`. A gate whose verdict depends on what an
+# earlier run left behind is one people learn to ignore.
+#
+# build/ is where output is SUPPOSED to go; excluding it is the point of having
+# a designated directory.
+find "$ROOT" -name '*.pdf' -not -path '*/build/*' | sort > "$t/pdfs-before"
 if "$SS" "$ROOT/examples/minimal.md" -o "$t/out.pdf" >"$t/cli.log" 2>&1; then
   if [ -f "$t/out.pdf" ]; then ok "built to the requested path"; else bad "no PDF at the requested path"; fi
-    # build/ is where output is SUPPOSED to go; excluding it is the point of
-  # having a designated directory. This checks nothing leaks anywhere else.
-  stray=$(find "$ROOT" -name '*.pdf' -not -path '*/docs/*' -not -path '*/build/*' | head -1)
+  find "$ROOT" -name '*.pdf' -not -path '*/build/*' | sort > "$t/pdfs-after"
+  stray=$(comm -13 "$t/pdfs-before" "$t/pdfs-after" | head -1)
   if [ -z "$stray" ]; then ok "tool tree clean"; else bad "wrote into its own tree: $stray"; fi
   if command -v qpdf >/dev/null 2>&1; then
     if qpdf --check "$t/out.pdf" >/dev/null 2>&1; then ok "qpdf structural check"; else bad "qpdf reports a malformed PDF"; fi
@@ -217,6 +225,71 @@ if "$SS" "$t/add.md" --style styles/formal.tex --style "$t/setfont.tex" -o "$t/a
 else
   printf '  skip Inter not installed — cannot exercise the style ordering\n'
 fi
+
+step "the document decides: front matter beats the CLI's defaults"
+# Every one of these was forced with -V, which overrides a document's own front
+# matter. A file declaring `lang: de-DE` was typeset with British hyphenation and
+# shipped a catalogue /Lang of en-GB. The defaults now travel by
+# --metadata-file, which pandoc lets the document override.
+printf -- '---\ntitle: t\nlang: de-DE\n---\n\nHallo Welt.\n' > "$t/de.md"
+"$SS" "$t/de.md" --keep-tex -o "$t/de.pdf" >/dev/null 2>&1
+if grep -q 'ngerman' "$t/de.tex" 2>/dev/null; then ok "front matter lang is honoured"
+else bad "front matter lang was overridden by the CLI default"; fi
+# Control: the flag must still win, or --lang has become decorative.
+"$SS" "$t/de.md" --lang fr-FR --keep-tex -o "$t/fr.pdf" >/dev/null 2>&1
+if grep -q 'french' "$t/fr.tex" 2>/dev/null; then ok "control: an explicit --lang still beats the document"
+else bad "--lang no longer overrides the document"; fi
+
+# report, not scrartcl: the PDF is built before the .tex is written, so a class
+# that is not installed would fail the build and leave nothing to assert on.
+printf -- '---\ntitle: t\ndocumentclass: report\nfontsize: 12pt\n---\n\nx\n' > "$t/dc.md"
+"$SS" "$t/dc.md" --keep-tex -o "$t/dc.pdf" >/dev/null 2>&1
+if grep -q '{report}' "$t/dc.tex" 2>/dev/null && grep -q '12pt' "$t/dc.tex" 2>/dev/null; then
+  ok "documentclass and fontsize come from the document"
+else bad "documentclass/fontsize are still forced by the CLI"; fi
+
+step "paper size: A4 by default, and the document may still choose"
+paper () { pdfinfo "$1" 2>/dev/null | sed -n 's/^Page size:.*(\(.*\))$/\1/p'; }
+"$SS" "$t/de.md" -o "$t/a4.pdf" >/dev/null 2>&1
+got=$(paper "$t/a4.pdf")
+# Everything here already assumes A4: table-widths.lua measured its capacity for
+# it and formal.tex sets a4paper. The tool shipped US Letter regardless.
+if [ "$got" = "A4" ]; then ok "default paper is A4"; else bad "default paper is '$got', not A4"; fi
+printf -- '---\ntitle: t\npapersize: letter\n---\n\nx\n' > "$t/lt.md"
+"$SS" "$t/lt.md" -o "$t/lt.pdf" >/dev/null 2>&1
+got=$(paper "$t/lt.pdf")
+if [ "$got" = "letter" ]; then ok "control: a document may still choose its own paper"
+else bad "papersize in the document was ignored (got '$got')"; fi
+
+step "indent: the default is block paragraphs, not first-line indentation"
+# -V indent=false set the non-empty STRING "false", which pandoc's template
+# language treats as TRUE — so the setting that says it disables indentation was
+# switching it on. parskip is loaded only on the not-indented branch.
+printf -- '---\ntitle: t\n---\n\nOne.\n\nTwo.\n' > "$t/ind.md"
+"$SS" "$t/ind.md" --keep-tex -o "$t/ind.pdf" >/dev/null 2>&1
+if grep -q 'usepackage{parskip}' "$t/ind.tex" 2>/dev/null; then ok "block paragraphs by default"
+else bad "the indent default is inverted — paragraphs are first-line indented"; fi
+printf -- '---\ntitle: t\nindent: true\n---\n\nOne.\n\nTwo.\n' > "$t/ind2.md"
+"$SS" "$t/ind2.md" --keep-tex -o "$t/ind2.pdf" >/dev/null 2>&1
+if grep -q 'usepackage{parskip}' "$t/ind2.tex" 2>/dev/null; then
+  bad "control: indent: true did not switch indentation on"
+else ok "control: indent: true switches indentation on"; fi
+
+step "--keep-tex writes the source of the PDF beside it"
+# The .tex run never carried -M table-capacity, so --capacity changed the PDF and
+# not the .tex sitting next to it. Both invocations are now built by one function.
+"$SS" "$ROOT/examples/minimal.md" --capacity 40 --keep-tex -o "$t/c40.pdf" >/dev/null 2>&1
+"$SS" "$ROOT/examples/minimal.md" --capacity 80 --keep-tex -o "$t/c80.pdf" >/dev/null 2>&1
+w40=$(grep -o 'real{[0-9.]*}' "$t/c40.tex" 2>/dev/null | tr '\n' ' ')
+w80=$(grep -o 'real{[0-9.]*}' "$t/c80.tex" 2>/dev/null | tr '\n' ' ')
+if [ -n "$w40" ] && [ "$w40" != "$w80" ]; then ok "--capacity reaches the .tex ($w40)"
+else bad "--keep-tex ignored --capacity (40='$w40' 80='$w80')"; fi
+# Control: a failure must be reported, not discarded. A directory where the .tex
+# belongs is a write pandoc cannot make.
+mkdir -p "$t/kt/blocked.tex"
+if "$SS" "$ROOT/examples/minimal.md" --keep-tex -o "$t/kt/blocked.pdf" >/dev/null 2>&1; then
+  bad "control: --keep-tex swallowed a write failure and exited 0"
+else ok "control: a --keep-tex failure is reported"; fi
 
 step "text-layer.tex applies the fix, not just a comment about it"
 # This is the assertion the project most needs and least obviously needs: the
