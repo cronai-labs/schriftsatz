@@ -26,6 +26,10 @@ widths, and why a PDF that looks correct can have a text layer that is silently 
   many dashes you type in the separator row. This filter measures the cells instead,
   and floors every column at its longest unbreakable token so an amount never hangs off
   the rule. → [docs/table-widths.md](docs/table-widths.md)
+- **Tagged, archival output.** `--tagged` adds a structure tree and XMP metadata;
+  `--pdf-standard a-3b` or `ua-2` adds a conformance level, each validated against
+  veraPDF. A faithful text layer is only half of machine readable — the other half
+  is reading order and table structure. → [docs/decisions/tagged-pdf.md](docs/decisions/tagged-pdf.md)
 - **Break opportunities after slashes**, for languages that build long compounds.
 - **Preamble fragments** you can adopt one at a time, and an imprint component that is
   empty by default.
@@ -35,7 +39,8 @@ widths, and why a PDF that looks correct can have a text layer that is silently 
 ```bash
 brew install cronai-labs/tap/schriftsatz
 schriftsatz document.md              # → document.pdf
-schriftsatz verify document.pdf      # is the text layer faithful?
+schriftsatz document.md --tagged     # …with a structure tree a machine can read
+schriftsatz verify document.pdf      # is the text layer faithful? is it tagged?
 ```
 
 Use the fully-qualified name: Homebrew 6.0 added tap trust, and an unqualified
@@ -128,9 +133,14 @@ Everything a document build generates goes to `build/`, which is gitignored and 
 
 ## 📐 Scope
 
-Deliberately narrow, and intended to stay that way. Out of scope: diagram embedding, a
-style-pack DSL, document templates, HTML or DOCX output, and anything that would make
-this a general-purpose document system. If you need those, the table above points
+One claim: **a PDF that is correct to a machine, not only to a reader** — a faithful text
+layer, and a structure a parser can walk. Typesetting a document must be able to control
+itself — paper, language, fonts, margins, page furniture — is in scope because a tool nobody
+can produce their own documents with never gets used on the documents where the guarantee
+matters.
+
+Out of scope: diagram embedding, document templates, HTML or DOCX output, and anything that
+would make this a general-purpose document system. If you need those, the table above points
 somewhere better.
 
 ## ⚠️ Not legal advice

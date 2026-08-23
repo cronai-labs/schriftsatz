@@ -407,6 +407,147 @@ else
   printf '  skip could not build the table document\n'
 fi
 
+# Tagged output needs BOTH a recent pandoc and a recent LaTeX kernel, and the
+# second is the one that bites: \DocumentMetadata gained the `tagging` key in
+# the 2024-11-01 release, while Ubuntu 24.04 and Debian 13 ship an older TeX
+# Live. Probe the engine rather than parsing a version out of it — the question
+# is whether the key exists, and that is exactly what this asks.
+tagging_supported () {
+  local probe="$t/tagprobe"
+  mkdir -p "$probe"
+  cat > "$probe/p.tex" <<'PROBEEOF'
+\DocumentMetadata{tagging=on}
+\documentclass{article}
+\begin{document}x\end{document}
+PROBEEOF
+  ( cd "$probe" && xelatex -interaction=nonstopmode p.tex >p.out 2>&1 ) || return 1
+  ! grep -q 'document/metadata/tagging' "$probe/p.out"
+}
+
+if tagging_supported; then
+
+step "tagged output: a structure tree and XMP, on XeLaTeX"
+# A faithful text layer is only half of "machine readable". Without a structure
+# tree a reader has glyphs and positions and nothing else — no reading order, no
+# table structure, no way to tell a heading from a caption.
+tagged_yes () { pdfinfo "$1" 2>/dev/null | grep -qE '^Tagged: +yes'; }
+if "$SS" "$ROOT/examples/minimal.md" --tagged -o "$t/tag.pdf" >"$t/tag.log" 2>&1; then
+  if tagged_yes "$t/tag.pdf"; then ok "--tagged produces a tagged PDF"
+  else bad "--tagged produced an untagged PDF"; fi
+  if grep -aq 'xpacket' "$t/tag.pdf"; then ok "XMP metadata stream present"
+  else bad "no XMP metadata stream"; fi
+  # Control: an ordinary build must NOT be tagged, or the assertion above is
+  # measuring pandoc's default rather than this flag.
+  "$SS" "$ROOT/examples/minimal.md" -o "$t/untagged.pdf" >/dev/null 2>&1
+  if tagged_yes "$t/untagged.pdf"; then bad "control: an ordinary build is already tagged"
+  else ok "control: an ordinary build is not tagged"; fi
+else
+  bad "--tagged failed to build"; sed -n '1,10p' "$t/tag.log" | sed 's/^/       /'
+fi
+
+step "--pdf-standard sets the header version each standard requires"
+# Not cosmetic. \DocumentMetadata defaults to a PDF 2.0 header and PDF/A-1/2/3
+# require 1.7 or lower — veraPDF rule 6.1.2-1 was the ONLY failure standing
+# between this pipeline and a passing PDF/A-3b.
+for pair in "a-3b:1.7" "ua-2:2.0"; do
+  id=${pair%%:*}; want=${pair##*:}
+  if "$SS" "$ROOT/examples/minimal.md" --pdf-standard "$id" -o "$t/$id.pdf" >/dev/null 2>&1; then
+    got=$(head -c 8 "$t/$id.pdf" | sed 's/^%PDF-//')
+    if [ "$got" = "$want" ]; then ok "$id writes a PDF $want header"
+    else bad "$id wrote a PDF '$got' header, want $want"; fi
+  else bad "$id did not build"; fi
+done
+
+step "--pdf-standard will not report success on a PDF that does not declare it"
+# pandoc lets a document's own front matter override a metadata file, so a
+# `pdfstandard:` key in the document silently beats the flag. Without the
+# read-back the caller ships something other than what they asked for.
+printf -- '---\ntitle: t\npdfstandard:\n  tagging: false\n---\n\nx\n' > "$t/ovr.md"
+if "$SS" "$t/ovr.md" --pdf-standard a-3b -o "$t/ovr.pdf" >"$t/ovr.log" 2>&1; then
+  bad "a document overriding the flag was reported as success"
+elif [ $? -eq 4 ]; then ok "the override is caught and reported (exit 4)"
+else bad "wrong exit code for the override case"; fi
+
+step "an unknown standard is a usage error that lists what is offered"
+if "$SS" "$ROOT/examples/minimal.md" --pdf-standard a-1b -o "$t/no.pdf" >"$t/no.log" 2>&1; then
+  bad "an unknown standard exited 0"
+elif [ $? -eq 2 ] && grep -q 'a-3b' "$t/no.log"; then
+  ok "unknown standard exits 2 and names the validated ones"
+else bad "unknown standard: wrong exit code, or the message does not help"; fi
+
+step "verify reports what a machine can get from the PDF"
+# Captured rather than piped into grep: `set -o pipefail` is on, and grep -q
+# exits at the first match, so the writer takes SIGPIPE and its 141 becomes the
+# pipeline's verdict. The assertion then fails for a reason that has nothing to
+# do with what it is testing.
+vout=$("$SS" verify "$t/a-3b.pdf" 2>&1)
+case "$vout" in *"declaring PDF/A-3b"*) ok "verify names the declared standard" ;;
+                *) bad "verify did not report the declared standard" ;; esac
+vout=$("$SS" verify "$t/untagged.pdf" 2>&1)
+case "$vout" in *"not tagged"*) ok "verify says so when a PDF carries no structure tree" ;;
+                *) bad "verify did not report the absence of tagging" ;; esac
+
+step "PDF/UA-2 requires a title, and the tool says so rather than shipping it"
+# veraPDF rule 8.11.1-1: the XMP must carry dc:title. It was the only failure for
+# examples/formal-document.md, whose front matter sets an empty title on purpose.
+# Catching it here means the caller is told by name at build time instead of
+# discovering it from a validator, or not at all.
+printf -- '---\ntitle: ""\n---\n\nNo title here.\n' > "$t/nt.md"
+if "$SS" "$t/nt.md" --pdf-standard ua-2 -o "$t/nt.pdf" >"$t/nt.log" 2>&1; then
+  bad "a titleless document was accepted as PDF/UA-2"
+elif grep -q 'requires a document title' "$t/nt.log"; then
+  ok "a titleless document is refused, and the message names the cause"
+else
+  bad "refused, but the message does not name the cause"
+  sed -n '1,6p' "$t/nt.log" | sed 's/^/       /'
+fi
+# Control: the same document with a title must build.
+printf -- '---\ntitle: Has One\n---\n\nText.\n' > "$t/wt.md"
+if "$SS" "$t/wt.md" --pdf-standard ua-2 -o "$t/wt.pdf" >/dev/null 2>&1; then
+  ok "control: with a title it builds"
+else bad "control: a titled document was refused too"; fi
+
+step "veraPDF: the standards this tool offers actually validate"
+# A conformance declaration is what a downstream system trusts INSTEAD of
+# checking, so shipping one the file does not honour is worse than shipping
+# none. This is the assertion that keeps the offered list honest — PDF/A-2b and
+# PDF/A-4 are absent from it because they fail here, not because nobody tried.
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  # Under $ROOT/build so the path is mountable: a mktemp directory is outside
+  # the file sharing Docker Desktop grants by default on macOS.
+  vera="$ROOT/build/verapdf"; rm -rf "$vera"; mkdir -p "$vera"
+  # A document with page furniture AND a title: formal-document.md has an empty
+  # title on purpose, and PDF/UA-2 requires one.
+  {
+    printf -- '---\ntitle: Validation fixture\nlang: en-GB\n---\n\n'
+    printf -- '# Heading\n\nProse, a table, and a signature block.\n\n'
+    printf -- '| Item | Basis | Classification |\n|:---|:---|:---|\n'
+    printf -- '| Provisions | Best estimate | Kapitalertragsteuerbescheinigung |\n\n'
+    printf -- '\\signatureline{Exampleton, 1 January 2026}{A. Placeholder}\n'
+  } > "$vera/fixture.md"
+  for id in a-3b ua-2; do
+    "$SS" "$vera/fixture.md" --style styles/formal.tex \
+      --pdf-standard "$id" -o "$vera/$id.pdf" >/dev/null 2>&1
+    # veraPDF names its flavours without the "a-" and without the dash.
+    flavour=$(printf '%s' "$id" | sed 's/^a-//; s/-//')
+    out=$(docker run --rm -v "$vera":/data verapdf/cli:latest \
+            --format text --flavour "$flavour" "/data/$id.pdf" 2>/dev/null | grep -E '^(PASS|FAIL)')
+    case "$out" in
+      PASS*) ok "$id validates ($flavour)" ;;
+      *)     bad "$id does not validate: ${out:-no verdict}" ;;
+    esac
+  done
+  rm -rf "$vera"
+else
+  printf '  skip docker not available — veraPDF validation runs in CI\n'
+fi
+
+else
+  printf '\n\033[1mtagged output\033[0m\n'
+  printf '  skip LaTeX kernel predates the DocumentMetadata tagging key\n'
+  printf '       (needs the 2024-11-01 release or newer; see issue #59)\n'
+fi
+
 step "formal.tex: imprint is opt-in and never leaks"
 # Use a document that does NOT redefine \docimprint. formal-document.md does,
 # so without formal.tex it fails to build — and an earlier version of this test

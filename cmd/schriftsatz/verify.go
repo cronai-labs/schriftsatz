@@ -71,10 +71,76 @@ func verify(pdf string) int {
 		fmt.Println("note  only one extractor available; install uv for a cross-check")
 	}
 
+	reportStructure(pdf)
+
 	if rc == exitOK {
 		fmt.Printf("ok    %s: text layer is faithful\n", pdf)
 	}
 	return rc
+}
+
+// reportStructure says what a machine that is not a text extractor can get from
+// this PDF: reading order, table structure, and any declared conformance level.
+//
+// Always a note, never a finding. An untagged PDF is the overwhelming norm and
+// is not a defect in itself, so failing on it would make `verify` useless
+// against the documents people actually bring to it. But a faithful text layer
+// is only half of "machine readable", and the other half should be visible
+// rather than assumed — which is the whole reason this reports at all.
+func reportStructure(pdf string) {
+	tagged, known := isTagged(pdf)
+	missing, err := pdfDeclares(pdf, []string{"xpacket"})
+	hasXMP := err == nil && len(missing) == 0
+
+	switch {
+	case !known:
+		fmt.Println("note  pdfinfo not found; cannot tell whether this PDF is tagged")
+		return
+	case tagged:
+		what := "tagged: a structure tree is present"
+		if std := declaredStandard(pdf); std != "" {
+			what += ", declaring " + std
+		} else if hasXMP {
+			what += ", with XMP metadata"
+		}
+		fmt.Printf("ok    %s\n", what)
+	default:
+		fmt.Println("note  not tagged: no structure tree, so reading order and table")
+		fmt.Println("      structure are not available to a machine. Rebuild with")
+		fmt.Println("      --tagged, or --pdf-standard for an archival conformance level.")
+	}
+}
+
+// isTagged asks poppler. /MarkInfo and /StructTreeRoot live in the catalogue,
+// which is inside a compressed object stream, so unlike the XMP markers they
+// cannot be found by scanning bytes. The second return reports whether the
+// question could be answered at all — pdfinfo is optional here, as pypdf is.
+func isTagged(pdf string) (tagged, known bool) {
+	if _, err := exec.LookPath("pdfinfo"); err != nil {
+		return false, false
+	}
+	out, err := exec.Command("pdfinfo", pdf).Output()
+	if err != nil {
+		return false, false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "Tagged:") {
+			return strings.Contains(line, "yes"), true
+		}
+	}
+	return false, false
+}
+
+// declaredStandard reports the conformance level the file's XMP claims, reading
+// exactly the markers the build-time check writes.
+func declaredStandard(pdf string) string {
+	for _, name := range pdfStandardNames() {
+		std := pdfStandards[name]
+		if missing, err := pdfDeclares(pdf, std.declares); err == nil && len(missing) == 0 {
+			return std.label
+		}
+	}
+	return ""
 }
 
 func findPUA(s string) []string {

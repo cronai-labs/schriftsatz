@@ -118,6 +118,12 @@ jobs:
       # `make test`, not `make check`: linting is the megalinter job's
       # business now, and running it here too would mean two different
       # shellchecks disagreeing about the same files.
+      #
+      # This is also where veraPDF runs. tests/run.sh reaches for the
+      # verapdf/cli container when docker is available, which it is here and
+      # usually is not on a contributor's machine — so the assertion that the
+      # standards this tool OFFERS actually validate is enforced in CI and
+      # skipped with a notice locally.
       - run: make test
       - run: make build
 

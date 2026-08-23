@@ -64,6 +64,29 @@ which also drops the text-layer fix — do not reach for it to "start clean".
 
 Inspect what the binary carries with `schriftsatz --list-assets`.
 
+## Machine-readable output
+
+A faithful text layer is half of it. Without a structure tree a reader gets glyphs and
+positions — no reading order, no table structure, no way to tell a heading from a caption.
+
+```bash
+schriftsatz doc.md --tagged                 # structure tree + XMP metadata
+schriftsatz doc.md --pdf-standard a-3b      # …plus archival conformance (PDF/A-3b)
+schriftsatz doc.md --pdf-standard ua-2      # …plus accessibility conformance (PDF/UA-2)
+```
+
+Both need **pandoc >= 3.9**, and say so rather than quietly producing an untagged PDF. Only
+`a-3b` and `ua-2` are offered: they are the levels validated against veraPDF through this
+pipeline. PDF/A-2b and PDF/A-4 do not pass and are deliberately absent — see
+`docs/decisions/tagged-pdf.md` for the rule numbers.
+
+**PDF/UA-2 requires a document title.** Without `title:` in the front matter the build is
+refused, by name. That is the one precondition callers trip over.
+
+Say "passes veraPDF's machine-checkable rules", not "is PDF/UA conformant". PDF/UA also carries
+requirements no validator can decide — whether alternative text is *meaningful*, whether the
+heading hierarchy reflects the document. Passing is necessary, not sufficient.
+
 ## Diagnose a suspect PDF
 
 ```bash
@@ -113,6 +136,11 @@ a typesetting tool and takes no position on it.
 The binary embeds its filters and styles, but it is **not self-contained**: pandoc, xelatex and
 poppler must be present. Say that plainly rather than implying a single binary means no
 dependencies.
+
+Tagging on XeLaTeX has one gap worth naming: `tagpdf` cannot mark interword spaces on this
+engine, so word boundaries are not explicit in the structure tree. Measured, poppler and pypdf
+both recover them anyway from glyph positions — but a consumer walking the tree rather than
+extracting text has less to go on than with LuaLaTeX.
 
 PDF output is **not byte-reproducible** — two builds of the same source differ in font subset
 streams. The *text layer* is stable, and that is what `verify` asserts.
