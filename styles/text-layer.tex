@@ -31,11 +31,25 @@
 % so pypdf and anything else ignoring /ActualText still gets mojibake.
 %
 % This file APPLIES that fix rather than describing it. \defaultfontfeatures
-% sets a default for every font loaded afterwards, so including this fragment is
-% enough — you do not have to remember RawFeature={-calt} at each \setmainfont,
-% and it still holds when you pass features of your own:
+% sets a default for every font loaded AFTERWARDS, so any face a later header
+% file sets is covered without your having to remember RawFeature={-calt} at
+% each \setmainfont, and it holds when you pass features of your own:
 %
 %   \setmainfont{YourFace}[Numbers={Proportional,Lining}]   % -calt still applied
+%
+% WHAT THIS FRAGMENT CANNOT COVER, AND WHAT DOES
+%
+% A font pandoc has already loaded. pandoc emits header-includes — where -H
+% content lands — after its own font block, so a typeface named in front matter
+% as `mainfont:` is set before this file is read and \defaultfontfeatures
+% arrives too late for it:
+%
+%   line 22:  \setmainfont[]{Inter-Regular.otf}          <- pandoc
+%   line 96:  \defaultfontfeatures{RawFeature={-calt}}   <- here, too late
+%
+% filters/text-layer.lua covers that ordering, by appending the feature to the
+% document's own mainfontoptions. Neither part covers both orderings alone;
+% the CLI applies both.
 %
 % An earlier version of this file only explained the defect in a comment. A user
 % who included it and then set Inter got the exact bug the file is named after,

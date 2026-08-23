@@ -75,8 +75,10 @@ Exit 0 means the text layer is faithful. **Exit 1 is a finding, not a tool failu
 **`Private Use Area codepoints (U+E09E …)`** — the font substituted glyphs that carry no
 meaning outside it. The document renders correctly and extracts wrongly. Cause: a `calt`
 (contextual alternates) feature swapping punctuation for `.case` variants next to capitals and
-digits. Fix by disabling that feature on the font — the shipped `styles/text-layer.tex` does
-this for every font loaded after it, so the usual cause is a font set *without* that fragment.
+digits. Fix by disabling that feature on the font. `schriftsatz` applies this in two places —
+`styles/text-layer.tex` for fonts a header file loads, and `filters/text-layer.lua` for a font
+named in front matter, which pandoc loads before any header is read — so a PDF that fails this
+check was almost certainly not built by this tool.
 
 **`extractors disagree (poppler vs pypdf)`** — worse than it sounds. poppler discards Private
 Use Area codepoints, so a character silently vanishes; other readers keep them and yield

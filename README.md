@@ -6,7 +6,7 @@
 [![pandoc](https://img.shields.io/badge/pandoc-%E2%89%A5%202.17-brightgreen.svg)](https://pandoc.org)
 [![engine](https://img.shields.io/badge/engine-XeLaTeX-orange.svg)](https://tug.org/xetex/)
 
-Two pandoc Lua filters, three preamble fragments and a small CLI, extracted from a
+Three pandoc Lua filters, three preamble fragments and a small CLI, extracted from a
 working pipeline that renders a company's statutory documents. The parts worth
 publishing are the ones that took the longest to get right: how table columns get their
 widths, and why a PDF that looks correct can have a text layer that is silently wrong.
@@ -19,6 +19,9 @@ widths, and why a PDF that looks correct can have a text layer that is silently 
   XeLaTeX emit PDFs where minus signs and parentheses are visible on the page but
   absent from the extractable text. `−123,45` copies out as `123,45`. Both obvious
   fixes fail. → [docs/inter-calt-tounicode.md](docs/inter-calt-tounicode.md)
+  The fix ships in two halves, because one cannot cover both orderings: a preamble
+  fragment for fonts a header file loads, and a filter for a font named in front
+  matter, which pandoc loads before any header is read.
 - **Content-measured table column widths.** Pandoc derives pipe-table widths from how
   many dashes you type in the separator row. This filter measures the cells instead,
   and floors every column at its longest unbreakable token so an amount never hangs off
@@ -79,6 +82,7 @@ dependencies:
 
 ```bash
 pandoc doc.md --pdf-engine=xelatex \
+  --lua-filter filters/text-layer.lua \
   --lua-filter filters/table-widths.lua \
   --lua-filter filters/linebreaks.lua \
   -H styles/text-layer.tex \
