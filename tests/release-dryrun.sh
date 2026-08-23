@@ -64,6 +64,8 @@ fi
 # the version it is about to cut; a rehearsal at a different version is theatre.
 VERSION=$VERSION_OVERRIDE
 SYNTHETIC=0
+SYNTH_RANGE=""
+NO_PAST_RELEASE=0
 if [ -z "$VERSION" ]; then
   VERSION=$(docker run --rm -v "$REPO":/repo -w /repo "$CLIFF_IMAGE" \
               --bump --unreleased --context 2>/dev/null \
@@ -85,6 +87,12 @@ if [ -z "$VERSION" ]; then
       VERSION="0.0.1"
     fi
     SYNTHETIC=1
+    # Which release the notes should render, decided HERE — before the synthetic
+    # tag is created further down. --latest would resolve to THAT tag, and its
+    # range is empty by construction: "nothing releasable" is what put us on
+    # this path. Name the previous release instead.
+    prev=$(git -C "$REPO" tag -l 'v[0-9]*' --sort=-v:refname | sed -n 2p)
+    [ -n "$latest" ] && SYNTH_RANGE="${prev:+$prev..}v$latest"
     echo "release-dryrun: nothing releasable here — rehearsing the mechanics at $VERSION"
   fi
 fi
@@ -184,10 +192,23 @@ echo "/tests/mockgh/" >>"$WORK/src/.git/info/exclude"
 # synthetic path there is no such release: HEAD is already the last one, so the
 # range is empty and git-cliff exits with "No tag exists for the current
 # commit". Running the rehearsal on main right after a release hit exactly that.
-# --latest renders the previous release instead, which is the right content for
-# a run whose purpose is proving the MECHANICS rather than the render.
-if [ "$SYNTHETIC" -eq 1 ]; then
-  cliff_range=--latest
+#
+# The synthetic path therefore renders the PREVIOUS release, which is the right
+# content for a run whose purpose is proving the MECHANICS rather than the
+# render. It used to ask for that with --latest, and that was wrong: the
+# synthetic tag has already been created by this point, so --latest resolves to
+# IT, and its range is empty by construction. The assertion passed for months
+# only because a branch almost always carried some fix: or feat: commit that
+# made the range non-empty by accident; the first docs-only pull request after a
+# release found it. $SYNTH_RANGE is computed before that tag exists.
+if [ "$SYNTHETIC" -eq 1 ] && [ -n "$SYNTH_RANGE" ]; then
+  cliff_range=$SYNTH_RANGE
+elif [ "$SYNTHETIC" -eq 1 ]; then
+  # No tags at all — a repository before its first release. There is no past
+  # release to render, so no body here could carry entries. Render what there is
+  # and skip that assertion below rather than failing one that cannot hold.
+  cliff_range=--unreleased
+  NO_PAST_RELEASE=1
 else
   cliff_range=--current
 fi
@@ -322,8 +343,12 @@ PY
 EOF
   echo "  release body: ${body_bytes} bytes, ${body_entries} entries"
   # The assertion this whole harness exists for.
-  check "the release body carries entries (this shipped empty twice)" \
-    test "${body_entries:-0}" -ge 1
+  if [ "$NO_PAST_RELEASE" -eq 1 ]; then
+    printf '  skip no past release to render — no body here could carry entries\n'
+  else
+    check "the release body carries entries (this shipped empty twice)" \
+      test "${body_entries:-0}" -ge 1
+  fi
   check "the release body is exactly the generated notes" \
     test "${body_matches}" = "True"
   if [ "$SYNTHETIC" -eq 1 ]; then
@@ -464,8 +489,16 @@ if [ -s "$WORK/out-resume/release-updates.jsonl" ]; then
   resume_entries=$(python3 "$REPO/tests/first-body-entries.py" \
     "$WORK/out-resume/release-updates.jsonl")
   echo "  resumed body: ${resume_entries} entries"
-  check "a re-run REPLACES the stale body (release.mode)" \
-    test "${resume_entries:-0}" -ge 1
+  # Skipped, not faked, for the same reason as the entries assertion above:
+  # with no past release there is nothing non-empty to replace the body with.
+  # Forcing resume_entries=1 here would report a pass for something nothing
+  # verified, which is the one thing this harness must never do.
+  if [ "$NO_PAST_RELEASE" -eq 1 ]; then
+    printf '  skip no past release to render — nothing non-empty to replace with\n'
+  else
+    check "a re-run REPLACES the stale body (release.mode)" \
+      test "${resume_entries:-0}" -ge 1
+  fi
 else
   check "the resumed run updated the release" false
 fi
