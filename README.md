@@ -1,89 +1,151 @@
 # schriftsatz
 
-**Markdown to print-ready PDF, with a text layer you can trust.**
+**Markdown to print-ready PDF — with a text layer you can trust and a structure a machine can read.**
 
+[![Release](https://img.shields.io/github/v/release/cronai-labs/schriftsatz?sort=semver)](https://github.com/cronai-labs/schriftsatz/releases)
+[![CI](https://github.com/cronai-labs/schriftsatz/actions/workflows/ci.yml/badge.svg)](https://github.com/cronai-labs/schriftsatz/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![pandoc](https://img.shields.io/badge/pandoc-%E2%89%A5%202.17-brightgreen.svg)](https://pandoc.org)
 [![engine](https://img.shields.io/badge/engine-XeLaTeX-orange.svg)](https://tug.org/xetex/)
 
-Three pandoc Lua filters, three preamble fragments and a small CLI, extracted from a
-working pipeline that renders a company's statutory documents. The parts worth
-publishing are the ones that took the longest to get right: how table columns get their
-widths, and why a PDF that looks correct can have a text layer that is silently wrong.
+A PDF can look perfectly correct and be wrong underneath. Copy a figure out of it and the minus
+sign is gone. Hand it to a parser and there is no reading order, no table structure, nothing but
+glyphs and coordinates. Neither failure is visible on the page, so nobody looks until a number
+has already been read wrongly.
+
+`schriftsatz` renders Markdown through pandoc and XeLaTeX so that both layers are right, and
+gives you a `verify` command to prove it on any PDF — including ones it did not build.
 
 > *Ein Schriftsatz ist beides: ein Schriftstück bei Gericht, und gesetzter Text.*
 
-## ✨ What is here
+## 📄 A document, and what comes out
 
-- **A text-layer defect, documented and reproduced.** Inter's `calt` feature makes
-  XeLaTeX emit PDFs where minus signs and parentheses are visible on the page but
-  absent from the extractable text. `−123,45` copies out as `123,45`. Both obvious
-  fixes fail. → [docs/inter-calt-tounicode.md](docs/inter-calt-tounicode.md)
-  The fix ships in two halves, because one cannot cover both orderings: a preamble
-  fragment for fonts a header file loads, and a filter for a font named in front
-  matter, which pandoc loads before any header is read.
-- **Content-measured table column widths.** Pandoc derives pipe-table widths from how
-  many dashes you type in the separator row. This filter measures the cells instead,
-  and floors every column at its longest unbreakable token so an amount never hangs off
-  the rule. → [docs/table-widths.md](docs/table-widths.md)
-- **Tagged, archival output.** `--tagged` adds a structure tree and XMP metadata;
-  `--pdf-standard a-3b` or `ua-2` adds a conformance level, each validated against
-  veraPDF. A faithful text layer is only half of machine readable — the other half
-  is reading order and table structure. → [docs/decisions/tagged-pdf.md](docs/decisions/tagged-pdf.md)
-- **Break opportunities after slashes**, for languages that build long compounds.
-- **Preamble fragments** you can adopt one at a time, and an imprint component that is
-  empty by default.
+```markdown
+---
+title: Kontoauszug
+lang: de-DE
+imprint:
+  - Müller & Co. GmbH · 1 Example Street · 12345 Example City
+  - 'Directors: A. Placeholder · HRB 00000000 · 19 % VAT'
+---
 
-## 🚀 Quick start
+# Kontoauszug
+
+| Position | Grundlage | Betrag |
+|:---|:---|---:|
+| Beratung, laufend | Kapitalertragsteuerbescheinigung | −1.204,00 |
+| Lizenz, jährlich | Umsatzsteuervoranmeldung | 123,45 |
+```
+
+```bash
+schriftsatz kontoauszug.md --pdf-standard a-3b
+```
+
+Out comes an A4 PDF with German hyphenation, the imprint in the footer of **every** page, and
+table columns sized to what is in them rather than to how many dashes you typed. `−1.204,00`
+copies out as `−1.204,00`, minus sign intact. The file is tagged and declares PDF/A-3b, so an
+archive or a parser gets structure and not just pixels.
+
+Nothing in that front matter is LaTeX. `&`, `%` and `_` are escaped for you — hand-writing that
+`tabular` was the single thing callers got wrong most often.
+
+## 🚀 Install
 
 ```bash
 brew install cronai-labs/tap/schriftsatz
-schriftsatz document.md              # → document.pdf
-schriftsatz document.md --tagged     # …with a structure tree a machine can read
-schriftsatz verify document.pdf      # is the text layer faithful? is it tagged?
 ```
 
 Use the fully-qualified name: Homebrew 6.0 added tap trust, and an unqualified
 `brew install schriftsatz` after `brew tap` is refused.
 
-The binary carries its own Lua filters and LaTeX fragments — `--list-assets` to see them,
-`--print-asset <name>` to read one out, and `--style <name>` to use one:
-
-```bash
-schriftsatz document.md --style styles/formal.tex   # adds the footer and signature line
-```
-
-`--style` also takes a path to a header of your own, and adds to the default styles rather than
-replacing them. `--no-default-style` drops the defaults — including the text-layer fix.
-
-From a clone:
-
-```bash
-git clone https://github.com/cronai-labs/schriftsatz && cd schriftsatz
-make setup                  # verify the toolchain; installs nothing
-make check                  # lint + tests + leak scan (this is what CI runs)
-make build                  # compile the binary and build every example
-```
-
-As an agent skill, in any of the 76+ agents the installer supports:
+As an agent skill:
 
 ```bash
 npx skills add cronai-labs/schriftsatz
 ```
 
-`make` with no target lists everything.
+**Required:** `pandoc` ≥ 2.17, `xelatex`, and `poppler-utils` (`pdftotext`, `pdfinfo`) — all
+three come with the Homebrew cask. `--tagged` and `--pdf-standard` additionally need pandoc
+≥ 3.9 and a LaTeX kernel from 2024-11-01 or newer, and say so rather than quietly producing an
+untagged file.
 
-Defaults are supplied only where the document is silent, so `lang`, `papersize`, `fontsize`,
-`documentclass`, `indent`, `mainfont` and `geometry` in the front matter are yours to set.
-Paper is A4 and paragraphs are not first-line indented unless you say otherwise.
+## ✨ What it does
 
-**Required:** `pandoc` ≥ 2.17, `xelatex`, and `poppler-utils` (`pdftotext`, `pdfinfo`). The
-suite refuses to run without the extractors rather than pass vacuously on empty output.
-**Optional, skipped with a notice:** `pypdf` for the second-extractor assertions, `qpdf` for
-the structural check, `shellcheck` for `make lint`.
+- **Keeps the text layer faithful.** A font's `calt` feature makes XeLaTeX emit PDFs where minus
+  signs and parentheses are on the page but absent from the extractable text — `−123,45` copies
+  out as `123,45`. Both obvious fixes fail. The write-up, with a reproducer that needs nothing
+  but a stock TeX Live → [docs/inter-calt-tounicode.md](docs/inter-calt-tounicode.md)
+- **Sizes table columns by their content.** Pandoc derives pipe-table widths from how many
+  dashes you type in the separator row. This measures the cells instead, and floors every column
+  at its longest unbreakable token so an amount never hangs off the rule →
+  [docs/table-widths.md](docs/table-widths.md)
+- **Emits tagged and archival PDFs.** Structure tree, XMP metadata, and PDF/A-3b or PDF/UA-2 —
+  each validated against veraPDF → [docs/decisions/tagged-pdf.md](docs/decisions/tagged-pdf.md)
+- **Takes your house style as data.** Imprint, brand colours and letterhead from front matter or
+  a shared `--metadata-file`, escaped by pandoc's own writer.
+- **Breaks long compounds.** Break opportunities after slashes, for languages that build words
+  like `Bundesanzeiger/Registerauszug`.
 
-Use the filters without the CLI if you prefer — they are single files with no
-dependencies:
+## 🎛 What the document controls
+
+Defaults apply only where the document is silent, so anything set in front matter wins:
+
+```yaml
+---
+lang: de-DE          # hyphenation, and the PDF catalogue's /Lang
+papersize: a4        # the default
+fontsize: 11pt
+documentclass: article
+indent: false        # block paragraphs; true for first-line indentation
+mainfont: Inter      # any font fontspec can find — the calt fix still applies
+geometry: [top=30mm, left=25mm]
+imprint: [Line one, Line two]
+brand: {ink: '1A1A1A', secondary: '666666', hairline: 'D8D8D8'}
+letterhead: logo.pdf
+---
+```
+
+Put the same block in a file and share one identity across every document you produce:
+
+```bash
+schriftsatz doc.md --metadata-file house-style.yaml
+```
+
+Precedence throughout: the tool's defaults lose to that file, which loses to the document.
+`--lang` is the one flag that overrides the document, because someone rebuilding another
+person's file needs a way to.
+
+## 🔍 Verify any PDF
+
+```console
+$ schriftsatz verify statement.pdf
+ok    two extractors agree
+ok    tagged: a structure tree is present, declaring PDF/A-3b
+ok    statement.pdf: text layer is faithful
+```
+
+Exit 1 is a **finding about the PDF**, not a tool failure. It names what it found:
+
+```console
+$ schriftsatz verify from-elsewhere.pdf
+FAIL  from-elsewhere.pdf: text layer contains Private Use Area codepoints (U+EE6B)
+      the font mapped glyphs to codepoints that carry no meaning
+      outside it — see docs/inter-calt-tounicode.md
+ok    two extractors agree
+note  not tagged: no structure tree, so reading order and table
+      structure are not available to a machine. Rebuild with
+      --tagged, or --pdf-standard for an archival conformance level.
+```
+
+`U+EE6B` is a Private Use Area codepoint: it means whatever the font that produced it says it
+means, and nothing at all outside it. That scan is what catches the defect. A second extractor
+runs as a cross-check on top, because a text layer whose content depends on which reader opens
+it is not a text layer.
+
+## 🧰 Use the pieces without the CLI
+
+The filters are single files with no dependencies, and the style fragments can be adopted one at
+a time. `--list-assets` shows what the binary carries; `--print-asset <name>` reads one out.
 
 ```bash
 pandoc doc.md --pdf-engine=xelatex \
@@ -94,10 +156,18 @@ pandoc doc.md --pdf-engine=xelatex \
   -o doc.pdf
 ```
 
+`--style` takes a path of your own **or** an embedded name, and adds to the defaults rather than
+replacing them:
+
+```bash
+schriftsatz doc.md --style styles/formal.tex   # footer, signature line, letterhead
+```
+
 ## 🎯 Why XeLaTeX, and why not something else
 
-This is a small tool in a crowded space. It is worth being direct about where it does
-not compete — see [docs/why-not.md](docs/why-not.md) for the longer version.
+A small tool in a crowded space; better to be direct about where it does not compete. The longer
+version, including the case *against* this whole approach, is in
+[docs/why-not.md](docs/why-not.md).
 
 | If you want | Use |
 |:---|:---|
@@ -106,15 +176,24 @@ not compete — see [docs/why-not.md](docs/why-not.md) for the longer version.
 | Diagrams embedded from Markdown | [pandoc-ext/diagram](https://github.com/pandoc-ext/diagram) |
 | DIN 5008 business letters | KOMA-Script `scrlttr2` |
 | Fast modern typesetting, no LaTeX | [Typst](https://typst.app) |
-| CSV tables with computed widths | [pantable](https://github.com/ickc/pantable) |
+| Explicit interword marking in the structure tree | LuaLaTeX — XeTeX cannot do that part |
 
-What is left over, and what this repository is for: the text layer has to survive
-extraction, and table columns have to be sized by what is in them.
+What is left over, and what this repository is for: the text layer has to survive extraction,
+table columns have to be sized by what is in them, and the result has to be readable by a
+machine as well as by a person.
 
-## 🧪 Testing
+## 🧪 Development
 
-The suite asserts the failing cases as well as the passing ones. A test that only checks
-that the fix works cannot tell you whether it is still testing anything:
+```bash
+git clone https://github.com/cronai-labs/schriftsatz && cd schriftsatz
+make setup     # verify the toolchain; installs nothing
+make check     # lint + tests + leak scan — what CI runs
+make build     # compile, and build every example with the command it documents
+```
+
+`make` with no target lists everything. The suite asserts the **failing** cases as well as the
+passing ones, because a test that only checks that the fix works cannot tell you whether it is
+still testing anything:
 
 ```text
 ok   unfixed drops the minus (control)              absent −123,45
@@ -123,33 +202,26 @@ ok   -calt fixes it                                 present −123,45
 ok   actualtext FAILS under pypdf (the whole point) absent −123,45
 ```
 
-`tests/no-leaks.sh` is a hard gate against anything traceable to the private setup this
-was extracted from — by shape, not by a denylist, because a denylist publishes the strings it
-protects. It runs in CI, and as a pre-commit hook once you opt in with
-`git config core.hooksPath .githooks`.
-
-Everything a document build generates goes to `build/`, which is gitignored and which
-`make clean` deletes in full. CI asserts the working tree is clean after a build.
+Contributing, the commit and release conventions, and the leak gate:
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## 📐 Scope
 
-One claim: **a PDF that is correct to a machine, not only to a reader** — a faithful text
-layer, and a structure a parser can walk. Typesetting a document must be able to control
-itself — paper, language, fonts, margins, page furniture — is in scope because a tool nobody
-can produce their own documents with never gets used on the documents where the guarantee
-matters.
+One claim: **a PDF that is correct to a machine, not only to a reader.** Typesetting a document
+must be able to control for itself — paper, language, fonts, margins, page furniture, house
+style — is in scope too, because a tool nobody can produce their own documents with never gets
+used on the documents where the guarantee matters.
 
 Out of scope: diagram embedding, document templates, HTML or DOCX output, and anything that
-would make this a general-purpose document system. If you need those, the table above points
-somewhere better.
+would make this a general-purpose document system. The table above points somewhere better.
 
 ## ⚠️ Not legal advice
 
-`styles/formal.tex` provides a footer component. Whether your documents must carry
-particular information, and which, is a question for your jurisdiction and your adviser
-— this repository does not know and does not claim to. It is a typesetting tool.
+`styles/formal.tex` provides a footer component and `imprint:` fills it in. Whether your
+documents must carry particular information, and which, is a question for your jurisdiction and
+your adviser — this repository does not know and does not claim to. It is a typesetting tool.
 
 ## 📄 License
 
-MIT © [CronAI UG](https://cronai.de). "CronAI" is a trademark of CronAI UG; this licence
-grants no trademark rights. No fonts are bundled — see [LICENSE](LICENSE).
+MIT © [CronAI UG](https://cronai.de). "CronAI" is a trademark of CronAI UG; this licence grants
+no trademark rights. No fonts are bundled — see [LICENSE](LICENSE).

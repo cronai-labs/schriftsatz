@@ -586,6 +586,74 @@ else
   printf '       (needs the 2024-11-01 release or newer; see issue #59)\n'
 fi
 
+step "house style: the imprint comes from metadata, escaped by the writer"
+# Filling this in used to mean hand-writing a tabular in the Markdown, where an
+# unescaped % comments out the rest of the line and & and _ fail obscurely. The
+# fixture deliberately carries the characters that break that: & and %.
+{
+  printf -- 'imprint:\n'
+  printf -- '  - "Test & Co. GmbH · 1 Example Street · 12345 Example City"\n'
+  printf -- '  - "Rate 19 %% · ref_2026 · 100 %% owned"\n'
+  printf -- 'brand:\n  ink: "102A43"\n  secondary: "5B6B7A"\n'
+} > "$t/house.yaml"
+printf -- '---\ntitle: House style\nlang: en-GB\n---\n\n# Heading\n\nBody.\n' > "$t/hs.md"
+if "$SS" "$t/hs.md" --metadata-file "$t/house.yaml" --keep-tex -o "$t/hs.pdf" >"$t/hs.log" 2>&1; then
+  txt=$(pdftotext "$t/hs.pdf" - 2>/dev/null)
+  case "$txt" in *"Test & Co. GmbH"*) ok "an ampersand survives into the footer" ;;
+                 *) bad "the ampersand was lost or broke the imprint" ;; esac
+  case "$txt" in *"Rate 19 %"*) ok "a per-cent sign survives" ;;
+                 *) bad "the per-cent sign truncated the line" ;; esac
+  case "$txt" in *"ref_2026"*) ok "an underscore survives" ;;
+                 *) bad "the underscore was lost" ;; esac
+  # Declaring an imprint is opting in to the furniture that renders it.
+  if grep -q 'fancyhdr' "$t/hs.tex" 2>/dev/null; then
+    ok "formal.tex is loaded automatically"
+  else bad "the imprint was accepted but formal.tex was not loaded"; fi
+  if grep -q 'definecolor{doc-ink}{HTML}{102A43}' "$t/hs.tex" 2>/dev/null; then
+    ok "brand colours reach the preamble"
+  else bad "brand colours were ignored"; fi
+else
+  bad "the house style build failed"; sed -n '1,10p' "$t/hs.log" | sed 's/^/       /'
+fi
+# Control: a document declaring none of it must gain no page furniture, or the
+# assertions above are measuring a default rather than the metadata.
+printf -- '---\ntitle: Plain\n---\n\nBody.\n' > "$t/nohouse.md"
+"$SS" "$t/nohouse.md" --keep-tex -o "$t/nohouse.pdf" >/dev/null 2>&1
+if grep -q 'fancyhdr' "$t/nohouse.tex" 2>/dev/null; then
+  bad "control: a document with no imprint got page furniture anyway"
+else ok "control: no imprint, no page furniture"; fi
+
+step "house style: the letterhead, and its height"
+# A built PDF stands in for a logo — \includegraphics takes one, and generating
+# it here avoids committing a binary fixture for a two-line assertion.
+printf -- '---\ntitle: LOGOMARK\n---\n\nlogo\n' > "$t/logo.md"
+"$SS" "$t/logo.md" -o "$t/logo.pdf" >/dev/null 2>&1
+printf -- '---\ntitle: t\nletterhead: %s\nletterhead-height: 12mm\n---\n\n\\docletterhead\n\nBody.\n' \
+  "$t/logo.pdf" > "$t/lh.md"
+if "$SS" "$t/lh.md" --keep-tex -o "$t/lh.pdf" >/dev/null 2>&1; then
+  # The generated command only, not formal.tex's commented example of one.
+  if grep -q 'includegraphics\[height=12mm\]' "$t/lh.tex" 2>/dev/null; then
+    ok "letterhead-height overrides the default"
+  else bad "letterhead-height was ignored"; fi
+  txt=$(pdftotext "$t/lh.pdf" - 2>/dev/null)
+  case "$txt" in *LOGOMARK*) ok "the letterhead is drawn onto the page" ;;
+                 *) bad "the letterhead did not reach the page" ;; esac
+else bad "the letterhead build failed"; fi
+
+step "--metadata-file: the document still wins, and a missing file is a usage error"
+# Same precedence as everywhere else: defaults < house style < document.
+printf -- '---\ntitle: t\nimprint:\n  - "From the document"\n---\n\nx\n' > "$t/own.md"
+"$SS" "$t/own.md" --metadata-file "$t/house.yaml" -o "$t/own.pdf" >/dev/null 2>&1
+txt=$(pdftotext "$t/own.pdf" - 2>/dev/null)
+case "$txt" in *"From the document"*) ok "the document overrides the house style" ;;
+               *) bad "the house style overrode the document" ;; esac
+case "$txt" in *"Test & Co. GmbH"*) bad "the overridden house style still appeared" ;;
+               *) ok "control: the overridden value is gone" ;; esac
+if "$SS" "$t/hs.md" --metadata-file "$t/absent.yaml" -o "$t/x.pdf" >/dev/null 2>&1; then
+  bad "a missing metadata file exited 0"
+elif [ $? -eq 2 ]; then ok "a missing metadata file exits 2"
+else bad "a missing metadata file returned the wrong code"; fi
+
 step "formal.tex: imprint is opt-in and never leaks"
 # Use a document that does NOT redefine \docimprint. formal-document.md does,
 # so without formal.tex it fails to build — and an earlier version of this test
@@ -604,9 +672,8 @@ if pdftotext "$t/bare.pdf" - 2>/dev/null | grep -qE "Street|Directors:|Registry"
 else ok "default imprint is empty"; fi
 
 step "formal.tex: imprint reaches page 1 (the plain-page-style trap)"
-"$SS" "$ROOT/examples/formal-document.md" \
-  --style "$t/emb-text-layer.tex" --style "$t/emb-linebreaking.tex" \
-  --style "$t/emb-formal.tex" -o "$t/formal.pdf" >/dev/null 2>&1
+# No --style: the example declares an imprint, which loads formal.tex.
+"$SS" "$ROOT/examples/formal-document.md" -o "$t/formal.pdf" >/dev/null 2>&1
 pages=$(pdfinfo "$t/formal.pdf" 2>/dev/null | awk '/^Pages:/{print $2}')
 miss=0
 for p in $(seq 1 "${pages:-1}"); do

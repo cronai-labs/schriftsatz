@@ -121,25 +121,45 @@ same fix.
 Do not "fix" either by switching fonts at random. Any font with case-sensitive punctuation
 behaves this way; the fix is the feature setting, not the typeface.
 
-## The one piece of LaTeX a caller has to write
+## House style: imprint, brand, letterhead
 
-`formal.tex` gives an **empty** imprint by default — it deliberately knows nothing about the
-user. Filling it in means writing raw LaTeX inside the Markdown, which is where callers get
-stuck, because an unescaped `%` silently comments out the rest of the line and `&` and `_`
-fail obscurely:
+Never hand-write LaTeX for this. Set it as metadata and pandoc's LaTeX writer does the
+escaping, so `Müller & Co.`, `19 %` and `ref_2026` come out right:
 
-```latex
-\renewcommand{\docimprint}{%
-  \footnotesize\color{doc-secondary}%
-  \begin{tabular}[b]{@{}l@{}}
-  ABC Company Ltd · 1 Example Street · EX4 2MP Exampleton\\
-  Directors: A. Placeholder · Reg. 00000000
-  \end{tabular}}
+```yaml
+---
+imprint:
+  - ABC Company Ltd · 1 Example Street · EX4 2MP Exampleton
+  - 'Directors: A. Placeholder · Reg. 00000000'
+brand:
+  ink: '1A1A1A'          # body text
+  secondary: '666666'    # footer and secondary text
+  hairline: 'D8D8D8'     # rules and dividers
+letterhead: logo.pdf
+letterhead-height: 9mm
+---
 ```
 
-Escape `% & _ # $` as `\% \& \_ \# \$` in any value placed there. Whether a document *must*
-carry particular particulars is a question for the caller's jurisdiction and adviser; this is
-a typesetting tool and takes no position on it.
+Declaring `imprint` or `letterhead` **loads `styles/formal.tex` automatically** — a document
+asking for a footer is opting in to the furniture that shows it. No `--style` needed.
+
+Put the same block in a file for one identity across many documents:
+
+```bash
+schriftsatz doc.md --metadata-file house-style.yaml
+```
+
+Precedence throughout: the tool's defaults lose to the house-style file, which loses to the
+document's own front matter. A flag beats all three.
+
+The signature line stays a body command, because where it goes is a position in the text:
+
+```latex
+\signatureline{Exampleton, 1 January 2026}{A. Placeholder — Director}
+```
+
+Whether a document *must* carry particular particulars is a question for the caller's
+jurisdiction and adviser; this is a typesetting tool and takes no position on it.
 
 ## What not to promise
 

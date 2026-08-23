@@ -1,14 +1,14 @@
 ---
 title: ''
 lang: en-GB
+imprint:
+  - ABC Company Ltd · 1 Example Street · EX4 2MP Exampleton
+  - 'Directors: A. Placeholder · Reg. 00000000, Example Companies Registry'
+brand:
+  ink: '1A1A1A'
+  secondary: '666666'
+  hairline: 'D8D8D8'
 ---
-
-\renewcommand{\docimprint}{%
-  \footnotesize\color{doc-secondary}%
-  \begin{tabular}[b]{@{}l@{}}
-  ABC Company Ltd · 1 Example Street · EX4 2MP Exampleton\\
-  Directors: A. Placeholder · Reg. 00000000, Example Companies Registry
-  \end{tabular}}
 
 # Statement of account
 
@@ -23,32 +23,42 @@ exists to demonstrate the style, not to model any real organisation.
 Build it with:
 
 ```
-schriftsatz examples/formal-document.md --style styles/formal.tex
+schriftsatz examples/formal-document.md
 ```
 
-`styles/formal.tex` is named here, not on disk: `--style` accepts any name
-`schriftsatz --list-assets` prints, so the styles the binary carries are reachable
-from any directory. The default text-layer and line-breaking styles still apply —
-`--style` adds to them.
+No `--style` is needed. Declaring `imprint:` is opting in to the page furniture
+that shows it, so `styles/formal.tex` is loaded automatically.
 
 ## 1. What this example shows
 
-Three things `styles/formal.tex` provides, none of which are switched on by
-default:
+1. **The imprint, as data.** Many jurisdictions require certain particulars on
+   business correspondence. Set `imprint:` in the front matter — as this file
+   does above — and it appears in the footer of every page. Set nothing and the
+   footer carries a page number and nothing else. The style ships knowing
+   nothing about you.
 
-1. **The imprint.** Many jurisdictions require certain particulars on business
-   correspondence. Redefine `\docimprint` — as this file does above — and it
-   appears in the footer of every page. Leave it alone and the footer carries a
-   page number and nothing else. The style ships knowing nothing about you.
+   It used to take a hand-written `tabular` here in the Markdown, and that is
+   why this is metadata now: an unescaped `%` comments out the rest of the line,
+   and `&` and `_` fail obscurely. Rendered through pandoc's LaTeX writer, a
+   firm called `Müller & Co.` and a rate of `19 %` come out right without anyone
+   quoting anything.
 
-2. **The `plain` page style.** Page one uses LaTeX's `plain` style whenever the
+   Put the same block in a file and pass `--metadata-file house-style.yaml` to
+   share one identity across every document an organisation produces. The
+   document's own front matter still wins over the file.
+
+2. **Brand colours.** `brand.ink`, `brand.secondary` and `brand.hairline` set
+   the three colours the style declares. The values above are the neutral greys
+   that apply if you set nothing.
+
+3. **The `plain` page style.** Page one uses LaTeX's `plain` style whenever the
    document carries a title block. Without the mirrored definition in
    `formal.tex`, page one would silently lose the imprint while every later page
    kept it — and page one is exactly where a letter's particulars belong. That
    asymmetry is easy to ship without noticing, because the document looks fine
    unless you check page one specifically.
 
-3. **The signature line**, below, which cannot be split by a page break.
+4. **The signature line**, below, which cannot be split by a page break.
 
 ## 2. A table, for the width filter
 

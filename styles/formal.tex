@@ -35,6 +35,12 @@
 %     \end{tabular}}
 %
 % Left empty, the footer simply carries a page number.
+%
+% You do not have to write that by hand. Set `imprint:` in the document's front
+% matter, or in a file passed with --metadata-file, and the CLI renders it
+% through pandoc's LaTeX writer — which escapes % & _ # $ for you, and loads
+% this file automatically because a document declaring an imprint is asking for
+% the furniture that shows it.
 \providecommand{\docimprint}{}
 
 \makeatletter
