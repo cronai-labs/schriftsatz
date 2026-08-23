@@ -46,6 +46,16 @@ geometry:            # margins
 ---
 ```
 
+`header-includes` works too, and is included after the tool's own styles so the document can
+override them:
+
+```yaml
+header-includes:
+  - |
+    \usepackage{soul}
+    \definecolor{doc-secondary}{HTML}{444444}
+```
+
 `--lang` is the one flag that overrides the document, because a caller rebuilding someone
 else's file needs a way to. Everything else is the document's decision.
 
