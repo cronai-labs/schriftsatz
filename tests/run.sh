@@ -323,13 +323,19 @@ step "the document's own header-includes reaches the preamble"
 # default styles mean -H is always passed — so a document's own header-includes
 # silently never arrived.
 #
-# Tested with \usepackage, NOT \newcommand. pandoc's latex_macros extension
-# expands macro definitions itself, so a \newcommand in header-includes appears
-# to work even when the preamble never received it — which is how this defect
-# hid from a hand test.
-printf -- '---\ntitle: t\nheader-includes:\n  - |\n    \\usepackage{soul}\n    \\typeout{DOC-PREAMBLE-REACHED}\n---\n\nx\n' > "$t/hi.md"
+# Tested with \typeout, NOT \newcommand. pandoc's latex_macros extension expands
+# macro definitions itself, so a \newcommand in header-includes appears to work
+# even when the preamble never received it — which is how this defect hid from a
+# hand test.
+#
+# \typeout rather than \usepackage for a second reason: it is a kernel
+# primitive, so the assertion does not depend on which packages a TeX
+# distribution happens to carry. An earlier version loaded soul, which is absent
+# from the deliberately minimal TeX set in ci.yml, so the build failed and the
+# test reported the defect it exists to detect.
+printf -- '---\ntitle: t\nheader-includes:\n  - |\n    \\typeout{DOC-PREAMBLE-REACHED}\n---\n\nx\n' > "$t/hi.md"
 if "$SS" "$t/hi.md" --keep-tex -o "$t/hi.pdf" >/dev/null 2>&1 \
-   && grep -q 'usepackage{soul}' "$t/hi.tex" 2>/dev/null; then
+   && grep -q 'DOC-PREAMBLE-REACHED' "$t/hi.tex" 2>/dev/null; then
   ok "header-includes from the document is in the preamble"
 else bad "the document's header-includes was discarded"; fi
 # And it must come AFTER the tool's styles, so the document has the last word.
@@ -341,7 +347,7 @@ else bad "ordering wrong: document at ${hi_line:-?}, styles at ${tl_line:-?}"; f
 # Control: with no -H at all the variable is intact, so the recovery must not
 # run — otherwise the content is rendered twice.
 "$SS" "$t/hi.md" --no-default-style --keep-tex -o "$t/hi2.pdf" >/dev/null 2>&1
-n=$(grep -c 'usepackage{soul}' "$t/hi2.tex" 2>/dev/null || true)
+n=$(grep -c 'DOC-PREAMBLE-REACHED' "$t/hi2.tex" 2>/dev/null || true)
 if [ "${n:-0}" = "1" ]; then ok "control: not duplicated when no style is passed"
 else bad "control: header-includes appears ${n:-0} times with --no-default-style"; fi
 # Control: a document with none must still build.
