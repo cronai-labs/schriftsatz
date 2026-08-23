@@ -544,7 +544,7 @@ fi
 
 else
   printf '\n\033[1mtagged output\033[0m\n'
-  printf '  skip LaTeX kernel predates the DocumentMetadata `tagging` key\n'
+  printf '  skip LaTeX kernel predates the DocumentMetadata tagging key\n'
   printf '       (needs the 2024-11-01 release or newer; see issue #59)\n'
 fi
 
