@@ -102,13 +102,29 @@ homebrew_casks:
     # The correct fix is a Developer ID signature plus notarization, which
     # needs a paid Apple Developer account; until then this hook is what makes
     # the cask work at all, and users are trusting this tap directly.
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr",
-                           args: ["-dr", "com.apple.quarantine", "#{staged_path}/schriftsatz"]
-          end
+    #
+    # Declared as `postflight_steps`, not `hooks.post.install`. That hook renders
+    # a Ruby `postflight do` block, which Homebrew deprecated in 6.0.16 and
+    # every brew command loading the tap warned about (#71). The steps form is
+    # understood since Homebrew 5.1.14.
+    #
+    # A custom_block is a bridge, not the target. goreleaser's own
+    # `hooks.post.install_steps` (goreleaser#6873) is merged but unreleased,
+    # and the 2.17.1 pinned in .tool-versions only emits the deprecated
+    # block. When a release carries it, move this there and drop the
+    # escaping. Until then the block lands above `version`, which brew's
+    # stanza-order style check would flag and installs ignore.
+    #
+    # `{{staged_path}}` is a Homebrew step token and goreleaser templates use the
+    # same delimiters: the whole rendered cask passes through goreleaser's
+    # template engine once, so the token is written as a string literal that
+    # renders to itself. Unescaped, the release fails on an undefined function.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/schriftsatz"]
+        end
+      end
 
 release:
   draft: false
