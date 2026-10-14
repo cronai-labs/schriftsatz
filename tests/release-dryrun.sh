@@ -460,6 +460,17 @@ print(base64.b64decode(json.load(open(sys.argv[1]))['content']).decode())" \
     "$cask" >"$WORK/cask.rb"
   check "the cask strips the quarantine attribute" \
     grep -q 'com.apple.quarantine' "$WORK/cask.rb"
+  # The stanza, not only the argument. The deprecated `postflight do` block
+  # contains com.apple.quarantine too, so the check above passes either way and
+  # cannot see a regression to the form Homebrew warns about on every command
+  # (#71). The staged-path check catches the escaping in .goreleaser.yaml
+  # rendering to anything but Homebrew's own token.
+  no_legacy_postflight () { ! grep -qE '^ *postflight do' "$WORK/cask.rb"; }
+  check "the cask uses postflight_steps" \
+    grep -qE '^ *postflight_steps do' "$WORK/cask.rb"
+  check "the cask has no deprecated postflight block" no_legacy_postflight
+  check "the step names Homebrew's staged path" \
+    grep -qF '"{{staged_path}}/schriftsatz"' "$WORK/cask.rb"
   check "the cask carries version $VERSION" \
     grep -q "version \"$VERSION\"" "$WORK/cask.rb"
 else
