@@ -321,7 +321,7 @@ jobs:
 
       - name: Mint a token that may write to THIS repository
         id: token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
         with:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -337,7 +337,7 @@ jobs:
         # A second, separately scoped token rather than one covering both. The
         # release token must not be able to write to the tap and vice versa;
         # HOMEBREW_TAP_TOKEN is tap-only today and this keeps it that way.
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510  # v3.3.0
         with:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -443,7 +443,7 @@ jobs:
         # resuming a tag that already exists). Without the gate the skip above
         # would be advisory and the publish would proceed anyway.
         if: env.RESUME == 'true' || steps.stillcurrent.outputs.ok == 'true'
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de  # v7.3.0
         with:
           # One file pins goreleaser for this workflow, for
           # tests/release-dryrun.sh and for mise/asdf. Rehearsing with a
