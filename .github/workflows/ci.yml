@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+    # `edited` re-runs the policy job when the PR title changes; the default
+    # types do not, so a retitled PR kept the verdict on its old title (#60).
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,7 +28,7 @@ jobs:
   # per leg. Putting the matrix on the TeX job instead meant three multi-GB
   # installs per run, which is what made CI unusable.
   filters:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -55,7 +59,10 @@ jobs:
 
   # One job pays for TeX Live, and it is the only one that needs to.
   pdf:
-    runs-on: ubuntu-latest
+    # Pinned: TeX Live comes from the image's apt, so an image bump is a TeX
+    # Live upgrade. ubuntu-latest moving to 26.04 (TeX Live 2025) turned this
+    # job red with no code change (#79). Move it in a PR of its own.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -133,7 +140,7 @@ jobs:
           test -z "$(git status --porcelain)" || { git status --porcelain; exit 1; }
 
   policy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -155,6 +162,18 @@ jobs:
           echo "$ACTIONLINT_SHA256  /tmp/actionlint.tar.gz" | sha256sum -c -
           tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
           /tmp/actionlint -color
+
+      - name: Actions are pinned to a full commit SHA
+        run: |
+          unpinned="$(grep -rnE '^[[:space:]]*(-[[:space:]]+)?uses:' .github/workflows \
+            | grep -vE 'uses:[[:space:]]*\./' \
+            | grep -vE '@[0-9a-f]{40}([[:space:]]|$)' || true)"
+          if [ -n "$unpinned" ]; then
+            echo "::error::Actions must be pinned to a 40-character commit SHA:"
+            echo "$unpinned"
+            exit 1
+          fi
+          echo "ok: every uses: is SHA-pinned"
 
       - name: Conventional Commits on the PR title
         env:
@@ -179,7 +198,7 @@ jobs:
           fi
 
   secrets:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -187,10 +206,14 @@ jobs:
       - name: Denylist scan
         run: ./tests/no-leaks.sh
       - name: gitleaks
+        env:
+          GITLEAKS_VERSION: '8.30.1'
+          GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
         run: |
-          ver=8.28.0
-          curl -fsSL -o /tmp/gitleaks.tar.gz \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_linux_x64.tar.gz"
+          # Checksummed like actionlint: a release asset can be replaced.
+          url="https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o /tmp/gitleaks.tar.gz "$url"
+          echo "$GITLEAKS_SHA256  /tmp/gitleaks.tar.gz" | sha256sum -c -
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
           # `gitleaks detect` was removed; 8.x exposes git / dir / stdin.
           /tmp/gitleaks git --redact --no-banner .
@@ -205,7 +228,7 @@ jobs:
     #
     # Same script developers run as `make release-dryrun`, so CI and local
     # cannot drift.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -230,7 +253,7 @@ jobs:
     # whatever version the machine happened to have — local shellcheck 0.11.0
     # and CI's apt 0.9.0 disagreed twice over, so `make lint` passing locally
     # said nothing about whether the merge would be blocked.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -272,7 +295,7 @@ jobs:
     # single stable context instead of a list that drifts with the matrix.
     needs: [filters, pdf, policy, secrets, dryrun, megalinter]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Every dependency must have succeeded
