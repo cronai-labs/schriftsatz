@@ -105,7 +105,7 @@ jobs:
       - name: Install uv
         # Pinned to the exact release: astral-sh publishes no floating v10 tag
         # (v6 and earlier have one, v9/v10 do not), so `@v10` does not resolve.
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
         with:
           enable-cache: true
 
@@ -242,7 +242,7 @@ jobs:
         # The go flavor carries every linter enabled in .mega-linter.yml, and
         # FAIL_IF_MISSING_LINTER_IN_FLAVOR makes a wrong flavor an error rather
         # than a silently skipped check.
-        uses: oxsecurity/megalinter/flavors/go@9949bad031045f366be2467e00e8371a7328a2e2  # v10.1.0
+        uses: oxsecurity/megalinter/flavors/go@f2fe8c1cba37091848df3e524066c8c23ef353ed  # v10.2.0
         env:
           # ALWAYS the whole codebase, including on pull requests.
           #
